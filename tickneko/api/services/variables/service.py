@@ -44,6 +44,8 @@ class VariableSnapshot:
     context: VariableContext
     view: VariableView
     ttl: float | None
+    #: 所属工作流的名字（图级才有；账号级 / 图被删是空串）：只给响应里人看的，不参与键规则
+    workflow_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -218,8 +220,14 @@ class VariableService:
         self, context: VariableContext, view: VariableView
     ) -> VariableSnapshot:
         ttl = await self.cache.ttl(context.full_key)
+        # 图名随快照一起给出：图级才有，图被删了就只剩 id（记录已按图缓存，不重复查存储）
+        name = ""
+        if context.scope == "graph" and context.workflow_id:
+            record = await self._record(context.workflow_id)
+            name = record.name if record else ""
         return VariableSnapshot(
-            context, view, ttl if ttl is not None and math.isfinite(ttl) else None
+            context, view, ttl if ttl is not None and math.isfinite(ttl) else None,
+            workflow_name=name,
         )
 
     async def view(self, context: VariableContext) -> VariableSnapshot:

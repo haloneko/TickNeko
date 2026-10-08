@@ -25,6 +25,8 @@ class VariableData(BaseModel):
     owner_id: str = Field(default="", description="归属 id")
     #: 所属工作流 id；账号级变量不属于某一张图，是空串
     workflow_id: str = Field(default="", description="所属工作流 id（账号级为空串）")
+    #: 所属工作流的名字；图级变量才有，查不到（图已被删）是空串
+    workflow_name: str = Field(default="", description="所属工作流名（图级；查不到为空串）")
     #: 变量名（缓存键前缀之后的那一段）
     key: str = Field(description="变量名")
     #: 当前值（缓存层按文本存，见 docs/cache/cache.md）
@@ -46,6 +48,7 @@ class VariableData(BaseModel):
         )
         return cls(
             scope=context.scope, owner_id=context.owner_id, workflow_id=context.workflow_id,
+            workflow_name=snapshot.workflow_name,
             key=context.key, value=value, type=view.type, data=view.data, length=view.length,
             editable=view.editable, reason=view.reason, ttl=snapshot.ttl,
         )

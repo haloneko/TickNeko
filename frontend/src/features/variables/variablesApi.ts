@@ -21,6 +21,8 @@ export interface VariableEntry {
   owner_id: string
   /** 所属工作流 id；账号级变量为空串 */
   workflow_id: string
+  /** 所属工作流名；图级才有，图被删查不到则空串 */
+  workflow_name: string
   /** 变量名 */
   key: string
   /** 兼容旧只读调用方的文本预览 */

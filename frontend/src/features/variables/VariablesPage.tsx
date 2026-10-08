@@ -240,8 +240,11 @@ export default function VariablesPage() {
                           </span>
                         )}
                         {entry.workflow_id && (
-                          <span className={styles.workflow} title={entry.workflow_id}>
-                            图 · {entry.workflow_id}
+                          <span
+                            className={styles.workflow}
+                            title={`图 id：${entry.workflow_id}`}
+                          >
+                            图 · {entry.workflow_name || entry.workflow_id}
                           </span>
                         )}
                         <span className={styles.ttl}>{formatTtl(entry.ttl)}</span>
