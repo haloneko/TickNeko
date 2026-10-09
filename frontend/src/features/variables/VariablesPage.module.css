@@ -185,6 +185,18 @@ select.control {
   background: var(--surface-2);
   border-color: var(--border);
 }
+/* 变量类型：pill 形，跟方角的「图 / 图名」区分开——它是结构，不是身份 */
+.typeTag {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  padding: 1px 9px;
+  white-space: nowrap;
+}
+
 /* 「图」：只是个标识牌，走最弱的一档，别跟内容抢注意力 */
 .workflowTag {
   flex-shrink: 0;

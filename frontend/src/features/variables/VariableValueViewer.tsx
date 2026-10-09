@@ -4,6 +4,7 @@ import { Modal } from '../../common/Modal'
 import { ApiRequestError } from '../../lib/http'
 import {
   addVariable,
+  typeLabel,
   viewVariable,
   type VariableEntry,
   type VariableMutation,
@@ -18,7 +19,6 @@ import {
 } from './variableEdits'
 import styles from './VariableValueViewer.module.css'
 
-const TYPE_LABELS = { str: '文本', json: 'JSON', list: '列表', dict: '字典' }
 const emptyValue = (): ValueDraft => ({ text: '', format: 'text' })
 
 function shown(value: unknown): string {
@@ -277,7 +277,7 @@ export default function VariableValueViewer({
       <div className={styles.toolbar}>
         {entry.type && (
           <span className={styles.hint}>
-            {TYPE_LABELS[entry.type]}
+            {typeLabel(entry)}
             {entry.type === 'list' && entry.length !== null ? ` · ${entry.length} 项` : ''}
           </span>
         )}
@@ -326,7 +326,7 @@ export default function VariableValueViewer({
           {notice && <p role="status">{notice}</p>}
           {current.type && (
             <p className={styles.hint}>
-              {TYPE_LABELS[current.type]}
+              {typeLabel(current)}
               {current.type === 'list' && current.length !== null
                 ? ` · 当前 ${current.length} 项`
                 : ''}

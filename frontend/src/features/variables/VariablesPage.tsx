@@ -13,7 +13,7 @@
  * 筛选字段（草稿 vs 已生效）、归属下拉，以及行怎么渲染。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { listVariables, VARIABLE_SCOPES, type VariableEntry } from './variablesApi'
+import { listVariables, typeLabel, VARIABLE_SCOPES, type VariableEntry } from './variablesApi'
 import { fetchOwners, type Owner } from '../../lib/ownersApi'
 import { useAuth } from '../auth/authStore'
 import OwnerFilter, { ownerName } from '../../common/OwnerFilter'
@@ -239,6 +239,8 @@ export default function VariablesPage() {
                             {entry.owner_id ? ownerName(entry.owner_id, owners) : '无归属'}
                           </span>
                         )}
+                        {/* 类型：查看器注册的名字，紧跟归属，一眼看出这份变量是什么结构 */}
+                        {entry.type && <span className={styles.typeTag}>{typeLabel(entry)}</span>}
                         {entry.workflow_id && (
                           <>
                             {/* 「图」只是标识，名字单独一个标签：混在一个 chip 里读起来像一坨 */}

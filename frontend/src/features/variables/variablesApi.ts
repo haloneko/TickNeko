@@ -29,6 +29,8 @@ export interface VariableEntry {
   value: string
   /** 查看器的展示类型，与存储类型无关 */
   type: 'json' | 'list' | 'dict' | 'str' | null
+  /** 查看器注册时自带的中文名；空串 = 未注册（前端按 type 兜底） */
+  type_label: string
   data: unknown
   /** list 本体长度 */
   length: number | null
@@ -77,4 +79,20 @@ export function viewVariable(entry: VariableEntry) {
 export function addVariable(entry: VariableEntry, params: VariableMutation) {
   const identity = new URLSearchParams(variableIdentity(entry))
   return http.post<VariableEntry>(`/variables/add?${identity}`, params)
+}
+
+/** 类型名的兜底映射：只在查看器**没注册**名字时用（新查看器请在后端注册 label）。 */
+const TYPE_LABELS: Record<string, string> = {
+  str: '文本',
+  json: 'JSON',
+  list: '列表',
+  dict: '字典',
+}
+
+/**
+ * 界面上显示的类型名：**优先用查看器注册的那份**（后端下发），
+ * 好区分同一个 type 下不同节点的结构（如「列表」与「列表·计数」）。
+ */
+export function typeLabel(entry: VariableEntry): string {
+  return entry.type_label || (entry.type ? TYPE_LABELS[entry.type] ?? entry.type : '')
 }
