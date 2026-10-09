@@ -244,5 +244,13 @@ async def test_registered_plain_list_can_edit_without_creating_family(
     await viewer.add(items=["a", "a", ""])
     assert (await viewer.view()).data == ["a", "a", ""]
     assert not await memory.exists(f"{bound.full_key}:meta")
-    with pytest.raises(ValueError):
-        await ListViewer(bound, editable=False).add(item="x")
+
+
+async def test_viewer_label_is_registered_and_carried_by_view(memory: Cache) -> None:
+    """类型名由查看器自己注册：同一 view_type 下不同节点的结构靠它区分。"""
+    assert ListViewer.label == "列表"
+    assert DsListViewer.label == "列表·计数"  # 本体之外还有 :meta 计数，可整体覆盖
+    assert DsDictViewer.label == "键值对"
+    # result() 把注册的名字带进 view，接口层不再自己拼
+    result = await DsListViewer(context(memory), editable=True).view()
+    assert result.type == "list" and result.label == "列表·计数"

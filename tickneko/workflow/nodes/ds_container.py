@@ -249,6 +249,8 @@ async def _pop(cache: CacheBackend, full_key: str, *, left: bool = False) -> lis
 class DsListViewer(ListViewer):
     """列表节点的查看 / 修改实现；与运行时节点复用同一套频次联动。"""
 
+    # 与通用列表区分：本体之外还有 :meta 记录元素出现次数，能安全整体覆盖
+    label = "列表·计数"
     priority = 100
     probe_editable = True
 

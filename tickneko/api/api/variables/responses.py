@@ -32,6 +32,8 @@ class VariableData(BaseModel):
     #: 当前值（缓存层按文本存，见 docs/cache/cache.md）
     value: str = Field(default="", description="变量当前值")
     type: VariableViewType | None = Field(default=None, description="查看器展示类型；null = 不支持查看")
+    #: 查看器注册时自带的中文名：同一个 type 下不同节点的结构靠它区分（如「列表」与「列表·计数」）
+    type_label: str = Field(default="", description="查看器注册的类型名；空串 = 未注册")
     data: Any = Field(default=None, description="查看器返回的结构化展示数据")
     length: int | None = Field(default=None, description="list 本体长度")
     editable: bool = Field(default=False, description="是否允许修改")
@@ -49,7 +51,8 @@ class VariableData(BaseModel):
         return cls(
             scope=context.scope, owner_id=context.owner_id, workflow_id=context.workflow_id,
             workflow_name=snapshot.workflow_name,
-            key=context.key, value=value, type=view.type, data=view.data, length=view.length,
+            key=context.key, value=value, type=view.type, type_label=view.label,
+            data=view.data, length=view.length,
             editable=view.editable, reason=view.reason, ttl=snapshot.ttl,
         )
 

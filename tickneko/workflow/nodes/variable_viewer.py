@@ -69,12 +69,21 @@ class VariableView:
     length: int | None = None
     editable: bool = False
     reason: str = ""
+    #: 查看器自己注册的中文名（界面显示用）；没注册就空串，前端退回按 type 映射
+    label: str = ""
 
 
 class VariableViewer:
     """子类声明规则与只读 probe，实现 view / add；同优先级冲突禁止写入。"""
 
     view_type: ClassVar[VariableViewType] = "str"
+    """
+    界面上显示的中文名：**注册查看器时一并注册**，前端直接显示，不自己按 type 猜。
+
+    同一个 ``view_type`` 可能有好几个查看器（比如通用列表与带计数联动的列表），
+    靠它区分「这份变量是哪个节点 / 哪种结构拥有的」。
+    """
+    label: ClassVar[str] = ""
     rules: ClassVar[tuple[VariableRule, ...]] = (VariableRule(),)
     priority: ClassVar[int] = 100
     storage_types: ClassVar[tuple[str, ...]] = ()
@@ -104,7 +113,9 @@ class VariableViewer:
         return kind is None or kind in cls.storage_types
 
     def result(self, data: Any, *, length: int | None = None) -> VariableView:
-        return VariableView(self.view_type, data, length, self.editable, self.reason)
+        return VariableView(
+            self.view_type, data, length, self.editable, self.reason, self.label
+        )
 
     async def view(self) -> VariableView:
         raise NotImplementedError

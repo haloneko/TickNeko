@@ -15,6 +15,7 @@ def _invalid_constant(value: str) -> None:
 
 class StringViewer(VariableViewer):
     view_type = "str"
+    label = "文本"
     priority = 0
     storage_types = ("string",)
 
@@ -41,6 +42,7 @@ class StringViewer(VariableViewer):
 
 class JsonViewer(StringViewer):
     view_type = "json"
+    label = "JSON"
     priority = 10
 
     @classmethod
@@ -73,6 +75,7 @@ class JsonViewer(StringViewer):
 
 class ListViewer(VariableViewer):
     view_type = "list"
+    label = "列表"
     priority = 0
     storage_types = ("list",)
     # 无来源 / 无键族证据的 list 可能是缺少辅助键的 ds-list，禁止通用写入。
@@ -113,6 +116,7 @@ class ListViewer(VariableViewer):
 
 class DictViewer(VariableViewer):
     view_type = "dict"
+    label = "字典"
     priority = 0
     storage_types = ("hash",)
 

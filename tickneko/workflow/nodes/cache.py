@@ -121,6 +121,7 @@ def _clip(raw: str) -> str:
 class CacheViewer(StringViewer):
     """cache 的写动作注册文本查看器，保留运行时的标量编码。"""
 
+    label = "缓存"
     priority = 100
     rules = (VariableRule(actions=("set",)),)
 

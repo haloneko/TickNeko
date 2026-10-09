@@ -185,6 +185,7 @@ async def _ensure_hash(
 class DsDictViewer(DictViewer):
     """字典节点拥有文本编码；完整 fields 保存删除未提交的旧字段。"""
 
+    label = "键值对"
     priority = 100
 
     def encode(self, value: Any) -> str:
