@@ -185,8 +185,19 @@ select.control {
   background: var(--surface-2);
   border-color: var(--border);
 }
-.workflow {
-  font-family: var(--font-mono);
+/* 「图」：只是个标识牌，走最弱的一档，别跟内容抢注意力 */
+.workflowTag {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+/* 图名：内容本体，比标识牌亮一档；长名字截尾（id 在 title 里） */
+.workflowName {
   font-size: 11.5px;
   color: var(--text-2);
   background: var(--surface-2);
