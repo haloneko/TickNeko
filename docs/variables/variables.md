@@ -91,10 +91,15 @@ workflow:acct:{owner_id}:{name}
 | `GET /api/variables` | 原有 `owner_id / scope / query / limit / offset` 查询与分页；只列**元数据**，不读本体值 |
 | `GET /api/variables/value` | 查看一个逻辑变量（完整字段） |
 | `POST /api/variables/add` | 新增或保存，整份 JSON 对象交给查看器 |
+| `DELETE /api/variables` | 删除一个逻辑变量（本体与键族辅助键一并清掉，不可恢复） |
 
-后两个接口通过 query 定位：图级传 `scope=graph&workflow_id=...&key=...`；账号级传
+后三个接口通过 query 定位：图级传 `scope=graph&workflow_id=...&key=...`；账号级传
 `scope=account&owner_id=...&key=...`，省略账号归属时取当前用户。图归属从工作流存储查，
 调用方不能指定或伪造。管理员可操作所有归属与已删图的孤儿变量，普通用户只能操作自己的。
+
+删除与修改同一权限口径（没登录 401、普通用户碰别人的 403、本体不存在 404）。删除把
+本体与键族辅助键（`:meta` / `:idx`）一起清掉，不残留内部数据；不影响其它变量，图 /
+节点下次运行会重新写入同名变量。
 
 沿用 `ApiResponse` 外壳，详情接口业务数据示例：
 
@@ -177,7 +182,8 @@ DsListViewer 新增会先按本体重建全部频次，运行时 push / pop / co
 
 回归测试在 `tests/test_variable_viewers.py`、`tests/test_variables.py`、`tests/test_ds_nodes.py`：
 覆盖注册兼容与去重、来源规则、账号级 / 已删图 / 失效节点探测、规则冲突、辅助键缺失、
-逻辑枚举与分页、重复 / 空元素计数、旧 idx 按需重建、完整覆盖、清空、权限、422 及部分存储失败。
+逻辑枚举与分页、重复 / 空元素计数、旧 idx 按需重建、完整覆盖、清空、删除（含键族清理、
+权限、孤儿变量、404）、权限、422 及部分存储失败。
 Redis 集成用例使用含冒号的独立 namespace，验证真实 HDEL 删空行为；本机无 Redis 时跳过，
 CI 的 Ubuntu Redis 服务会执行。
 

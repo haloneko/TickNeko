@@ -289,3 +289,15 @@ class VariableService:
             raise VariableNotEditable(resolution.reason or "该变量只允许查看")
         await viewer.add(**params)
         return await self._snapshot(context, await viewer.view())
+
+    async def delete(self, context: VariableContext) -> None:
+        """删除一个逻辑变量；本体不存在抛 ``VariableNotFound``。
+
+        键族辅助键（ds-list 的 ``:meta``、旧格式 ``:idx``）是内部实现细节，
+        一并清掉不残留；它们不会被当成独立变量暴露，但留着只会脏数据。
+        """
+        if not await self.cache.exists(context.full_key):
+            raise VariableNotFound("变量不存在")
+        await self.cache.delete_many(
+            [context.full_key, f"{context.full_key}:meta", f"{context.full_key}:idx"]
+        )

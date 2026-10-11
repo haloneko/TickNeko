@@ -186,3 +186,29 @@ async def add_variable(
     return ApiResponse[VariableData](
         data=VariableData.from_snapshot(snapshot), trace_id=trace_id_of(request)
     )
+
+
+@router.delete(
+    "",
+    response_model=ApiResponse[dict[str, bool]],
+    summary="删除变量",
+    responses=_RESPONSES,
+)
+async def delete_variable(
+    request: Request,
+    user: CurrentUserDep,
+    cache: CacheDep,
+    store: WorkflowStoreDep,
+    scope: str,
+    key: str,
+    owner_id: str | None = None,
+    workflow_id: str = "",
+) -> ApiResponse[dict[str, bool]]:
+    service = VariableService(cache, store)
+    context = await _context(
+        service, user, scope=scope, key=key, owner_id=owner_id, workflow_id=workflow_id
+    )
+    await _call(service.delete(context))
+    return ApiResponse[dict[str, bool]](
+        data={"deleted": True}, trace_id=trace_id_of(request)
+    )

@@ -592,3 +592,76 @@ class TestVariableViewers:
         assert data["editable"] and not await env.cache.exists(f"{key}:meta")
         page_of(await env.client.post(f"{VARIABLES_PATH}/add", headers=auth(token), params=params, json={"item": "b"}))
         assert await env.cache.hash_get_all(f"{key}:meta") == {"a": "2", "b": "1"}
+
+
+class TestVariableDeletion:
+    async def test_account_delete_removes_family_keys(self, env: Env) -> None:
+        """账号级变量删除：本体与 :meta / :idx 辅助键一并清掉，列表里不再出现。"""
+        token, owner = await login(env.client, ADMIN)
+        key = f"workflow:acct:{owner}:队列"
+        await env.cache.list_push_right(key, "a", "a", "b")
+        await env.cache.hash_set(f"{key}:meta", {"a": "2", "b": "1"})
+        await env.cache.hash_set(f"{key}:idx", {"legacy": "1"})
+
+        response = await env.client.delete(
+            VARIABLES_PATH,
+            headers=auth(token),
+            params={"scope": "account", "owner_id": owner, "key": "队列"},
+        )
+        assert response.status_code == 200
+        assert response.json()["data"] == {"deleted": True}
+        assert await env.cache.keys("workflow:*") == []
+        assert page_of(await env.client.get(VARIABLES_PATH, headers=auth(token)))["total"] == 0
+
+    async def test_delete_enforces_auth_and_ownership(self, env: Env) -> None:
+        """删除的权限口径与修改一致：没登录 401，普通用户删别人名下的图变量 403。"""
+        admin_token, admin_id = await login(env.client, ADMIN)
+        plain_token, _ = await register(env.client, PLAIN)
+        ident = await writer_graph(env, admin_id, "cache", "开关")
+        params = graph_params(ident, "开关")
+        key = f"workflow:graph:{ident}:开关"
+        await env.cache.set(key, "original")
+
+        assert (
+            await env.client.delete(VARIABLES_PATH, params=params)
+        ).status_code == 401
+        assert (
+            await env.client.delete(VARIABLES_PATH, headers=auth(plain_token), params=params)
+        ).status_code == 403
+        assert await env.cache.get(key) == "original"
+
+        response = await env.client.delete(
+            VARIABLES_PATH, headers=auth(admin_token), params=params
+        )
+        assert response.status_code == 200
+        assert await env.cache.get(key) is None
+
+    async def test_delete_orphan_graph_variable_admin_only(self, env: Env) -> None:
+        """图被删后留下的孤儿变量：普通用户删不了（403），管理员能删。"""
+        admin_token, admin_id = await login(env.client, ADMIN)
+        plain_token, _ = await register(env.client, PLAIN)
+        graph = await env.workflows.create(admin_id, "图一")
+        key = f"workflow:graph:{graph.id}:计数"
+        await env.cache.set(key, "1")
+        await env.workflows.delete(graph.id)
+
+        params = {"scope": "graph", "workflow_id": graph.id, "key": "计数"}
+        assert (
+            await env.client.delete(VARIABLES_PATH, headers=auth(plain_token), params=params)
+        ).status_code == 403
+        response = await env.client.delete(
+            VARIABLES_PATH, headers=auth(admin_token), params=params
+        )
+        assert response.status_code == 200
+        assert await env.cache.get(key) is None
+
+    async def test_delete_unknown_variable_is_404(self, env: Env) -> None:
+        """本体不存在：404，且不创建任何键（删除不该有探测副作用）。"""
+        token, owner = await login(env.client, ADMIN)
+        response = await env.client.delete(
+            VARIABLES_PATH,
+            headers=auth(token),
+            params={"scope": "account", "owner_id": owner, "key": "missing"},
+        )
+        assert response.status_code == 404
+        assert await env.cache.keys("workflow:*") == []
