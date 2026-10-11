@@ -223,7 +223,14 @@ select.control {
   color: var(--text-3);
 }
 
-/* 操作列：查看器根容器右对齐 */
+/* 操作列：查看器 + 删除按钮右对齐排成一行 */
+.rowActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
 .viewerCell {
   display: flex;
   justify-content: flex-end;

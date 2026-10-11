@@ -82,6 +82,12 @@ export function addVariable(entry: VariableEntry, params: VariableMutation) {
   return http.post<VariableEntry>(`/variables/add?${identity}`, params)
 }
 
+/** 删除一个逻辑变量：本体与键族辅助键（:meta / :idx）一并清掉，不可恢复。 */
+export function deleteVariable(entry: VariableEntry) {
+  const identity = new URLSearchParams(variableIdentity(entry))
+  return http.del<{ deleted: boolean }>(`/variables?${identity}`)
+}
+
 /** 类型名的兜底映射：只在查看器**没注册**名字时用（新查看器请在后端注册 label）。 */
 const TYPE_LABELS: Record<string, string> = {
   str: '文本',

@@ -13,14 +13,23 @@
  * 筛选字段（草稿 vs 已生效）、归属下拉，以及行怎么渲染。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { listVariables, typeLabel, VARIABLE_SCOPES, type VariableEntry } from './variablesApi'
+import {
+  deleteVariable,
+  listVariables,
+  typeLabel,
+  VARIABLE_SCOPES,
+  type VariableEntry,
+} from './variablesApi'
 import { fetchOwners, type Owner } from '../../lib/ownersApi'
+import { ApiRequestError } from '../../lib/http'
 import { useAuth } from '../auth/authStore'
 import OwnerFilter, { ownerName } from '../../common/OwnerFilter'
-import { IconRefresh, IconVariables } from '../../common/icons'
+import { ConfirmDialog } from '../../common/ConfirmDialog'
+import { IconRefresh, IconTrash, IconVariables } from '../../common/icons'
 import { ListSkeleton } from '../../common/Skeleton'
 import ErrorBox from '../../common/ErrorBox'
 import { usePagedQuery } from '../../common/usePagedQuery'
+import { useToast } from '../../common/Toast'
 import Pagination from '../../common/Pagination'
 import styles from './VariablesPage.module.css'
 import VariableValueViewer from './VariableValueViewer'
@@ -58,7 +67,12 @@ function formatTtl(ttl: number | null): string {
 
 export default function VariablesPage() {
   const { state } = useAuth()
+  const { pushToast } = useToast()
   const isAdmin = !!state.user?.roles.includes('admin')
+
+  /** 待删除的变量：非空就弹确认框（破坏性操作统一走 ConfirmDialog） */
+  const [pendingDelete, setPendingDelete] = useState<VariableEntry | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // 表单草稿（输入中）与已生效查询（点「查询」后才同步）
   const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS)
@@ -103,6 +117,21 @@ export default function VariablesPage() {
     setDraft(EMPTY_FILTERS)
     query.setPage(1)
     setApplied({ ...EMPTY_FILTERS })
+  }
+
+  /** 删除不可逆：确认后调接口，成功刷新列表；失败展示服务端文案（404 = 已被别人删掉）。 */
+  async function removeVariable(entry: VariableEntry) {
+    setDeleting(true)
+    try {
+      await deleteVariable(entry)
+      pushToast('success', `已删除变量「${entry.key}」`)
+      setPendingDelete(null)
+      void query.refresh(true)
+    } catch (err) {
+      pushToast('error', err instanceof ApiRequestError ? err.message : '删除失败，请重试')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const activeFilterCount = useMemo(() => {
@@ -276,13 +305,25 @@ export default function VariablesPage() {
                       </td>
                       <td className={styles.ttl}>{formatTtl(entry.ttl)}</td>
                       <td>
-                        {entry.type && (
-                          <VariableValueViewer
-                            entry={entry}
-                            onChanged={() => query.refresh(true)}
-                            className={styles.viewerCell}
-                          />
-                        )}
+                        <div className={styles.rowActions}>
+                          {entry.type && (
+                            <VariableValueViewer
+                              entry={entry}
+                              onChanged={() => query.refresh(true)}
+                              className={styles.viewerCell}
+                            />
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-danger-ghost"
+                            disabled={deleting}
+                            title="删除这个变量"
+                            onClick={() => setPendingDelete(entry)}
+                          >
+                            <IconTrash size={14} />
+                            删除
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -303,6 +344,24 @@ export default function VariablesPage() {
           </>
         )}
       </section>
+
+      {/* 删除不可逆：统一走确认弹窗 */}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="删除这个变量？"
+          body={
+            <>
+              删除 <b>{pendingDelete.key}</b>
+              ：它的值会被一并清掉，图 / 账号下的其它变量不受影响。删除不可恢复，
+              节点下次运行会重新写入。
+            </>
+          }
+          confirmText="删除"
+          busy={deleting}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => void removeVariable(pendingDelete)}
+        />
+      )}
     </div>
   )
 }
