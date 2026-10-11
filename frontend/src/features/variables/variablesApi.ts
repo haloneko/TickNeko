@@ -5,6 +5,7 @@
  * - 响应是一页 `{ items, total }`，total 是命中总数，前端据此算总页数、做页码跳转；
  * - 变量按作用域分两档：`graph`（图级，只有这张图看得见）/ `account`（账号级，同账号共享）；
  * - 非管理员后端强制只看自己的 owner_id，指定别人会 403 —— 所以普通用户不传 owner_id；
+ * - 列表接口只列元数据：value/data/length 为空，看内容走 /variables/value（viewVariable）；
  * - 缓存没接入时后端回 503（变量全在缓存里，没有它答不了）。
  */
 import { http } from '../../lib/http'
@@ -25,7 +26,7 @@ export interface VariableEntry {
   workflow_name: string
   /** 变量名 */
   key: string
-  /** 兼容旧只读调用方的文本预览 */
+  /** 兼容旧只读调用方的文本预览（列表接口只列元数据，value 为空串） */
   value: string
   /** 查看器的展示类型，与存储类型无关 */
   type: 'json' | 'list' | 'dict' | 'str' | null
@@ -58,7 +59,7 @@ export interface VariableSearchParams {
   offset?: number
 }
 
-/** 列出变量。params 里 undefined 的字段不发。 */
+/** 列出变量（只含元数据，不读本体值；看内容请走 viewVariable）。params 里 undefined 的字段不发。 */
 export function listVariables(params: VariableSearchParams = {}) {
   return http.get<VariablePage>('/variables', { params })
 }

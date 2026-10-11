@@ -1,4 +1,5 @@
-/** 按查看器展示类型渲染、编辑和调用 add；保存后重新读取，失败保留草稿。 */
+/** 按查看器展示类型渲染、编辑和调用 add；保存后重新读取，失败保留草稿。
+ * 列表行只带元信息（不读本体值），点「查看 / 编辑」打开弹窗时才拉详情。 */
 import { useRef, useState } from 'react'
 import { Modal } from '../../common/Modal'
 import { ApiRequestError } from '../../lib/http'
@@ -137,9 +138,12 @@ function clearsCollection(params: VariableMutation): boolean {
 export default function VariableValueViewer({
   entry,
   onChanged,
+  className = '',
 }: {
   entry: VariableEntry
   onChanged: () => void
+  /** 挂在根容器上的类名：列表把它塞进表格操作列时用来控制对齐 */
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   const [current, setCurrent] = useState(entry)
@@ -272,15 +276,8 @@ export default function VariableValueViewer({
   }
 
   return (
-    <div>
-      <Preview entry={entry} />
+    <div className={className}>
       <div className={styles.toolbar}>
-        {entry.type && (
-          <span className={styles.hint}>
-            {typeLabel(entry)}
-            {entry.type === 'list' && entry.length !== null ? ` · ${entry.length} 项` : ''}
-          </span>
-        )}
         {entry.type && (
           <button type="button" className="btn" onClick={showEditor}>
             {entry.editable ? '编辑' : '查看'}

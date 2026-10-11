@@ -14,6 +14,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiRequestError } from '../lib/http'
 import { totalPagesOf } from './Pagination'
 
+type QueryParams = Record<string, string | number>
+
 /** 错误态：供页面直接塞给 `<ErrorBox>`。 */
 export type PagedError = {
   title: string
@@ -25,14 +27,9 @@ export interface PagedQueryOptions<TItem, TFilter> {
   /** 已生效的筛选（点「查询」后同步）；引用变了就带着当前页码重拉 */
   applied: TFilter
   /** 组装请求参数：base 里 limit/offset 已按页码算好，只往里塞筛选字段 */
-  buildParams: (
-    filters: TFilter,
-    base: { limit: number; offset: number },
-  ) => Record<string, string | number>
+  buildParams: (filters: TFilter, base: { limit: number; offset: number }) => QueryParams
   /** 真正发请求：收到完整参数，返回本页条目 + 命中总数（页面对 api 响应做一层 .data 适配） */
-  fetchPage: (
-    params: Record<string, string | number>,
-  ) => Promise<{ items: TItem[]; total: number }>
+  fetchPage: (params: QueryParams) => Promise<{ items: TItem[]; total: number }>
   /** 默认每页条数 */
   defaultPageSize?: number
   /** 非 ApiRequestError 时的兜底标题，如「变量加载失败」 */

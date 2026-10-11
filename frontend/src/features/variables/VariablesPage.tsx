@@ -72,6 +72,7 @@ export default function VariablesPage() {
   /** 把已生效筛选翻译成后端参数：limit/offset 由 hook 按页码算好，这里只塞筛选字段。 */
   const buildParams = useCallback(
     (filters: Filters, base: { limit: number; offset: number }) => {
+      // 列表接口只列元数据：行内不摊开内容，点「查看 / 编辑」才单独拉详情
       const params: Record<string, string | number> = { ...base }
       if (filters.scope) params.scope = filters.scope
       const q = filters.query.trim()
@@ -219,48 +220,75 @@ export default function VariablesPage() {
           </div>
         ) : (
           <>
-            <ul className={styles.list}>
-              {query.items.map((entry) => (
-                <li key={`${entry.scope}:${entry.owner_id}:${entry.workflow_id}:${entry.key}`}>
-                  <div className={styles.row}>
-                    <span className={styles.scopeBadge} data-scope={entry.scope}>
-                      {SCOPE_LABELS[entry.scope] ?? entry.scope}
-                    </span>
-                    <div className={styles.rowMain}>
-                      <div className={styles.rowMeta}>
-                        <span className={styles.key}>{entry.key}</span>
-                        {isAdmin && (
+            {/* 表格样式与工作流页一致：作用域 / 变量名 / 类型 / 归属 / 所属图 / 有效期 / 操作 */}
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>作用域</th>
+                    <th>变量名</th>
+                    <th>类型</th>
+                    {isAdmin && <th>归属</th>}
+                    <th>所属图</th>
+                    <th>有效期</th>
+                    <th style={{ textAlign: 'right' }}>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {query.items.map((entry) => (
+                    <tr key={`${entry.scope}:${entry.owner_id}:${entry.workflow_id}:${entry.key}`}>
+                      <td>
+                        <span className={styles.scopeBadge} data-scope={entry.scope}>
+                          {SCOPE_LABELS[entry.scope] ?? entry.scope}
+                        </span>
+                      </td>
+                      <td className={styles.keyCell} title={entry.key}>
+                        {entry.key}
+                      </td>
+                      <td>
+                        {entry.type ? (
+                          <span className={`chip ${styles.typeTag}`}>{typeLabel(entry)}</span>
+                        ) : (
+                          <span className={styles.muted}>—</span>
+                        )}
+                      </td>
+                      {isAdmin && (
+                        <td
+                          className={`${styles.ownerCell} ${
+                            entry.owner_id ? '' : styles.ownerUnknown
+                          }`}
+                          title={entry.owner_id || '查不到归属（图可能已被删）'}
+                        >
+                          {entry.owner_id ? ownerName(entry.owner_id, owners) : '无归属'}
+                        </td>
+                      )}
+                      <td className={styles.graphCell}>
+                        {entry.workflow_id ? (
                           <span
-                            className={`${styles.ownerChip} ${
-                              entry.owner_id ? '' : styles.ownerUnknown
-                            }`}
-                            title={entry.owner_id || '查不到归属（图可能已被删）'}
+                            className={styles.graphName}
+                            title={`图 id：${entry.workflow_id}`}
                           >
-                            {entry.owner_id ? ownerName(entry.owner_id, owners) : '无归属'}
+                            {entry.workflow_name || entry.workflow_id}
                           </span>
+                        ) : (
+                          <span className={styles.muted}>—</span>
                         )}
-                        {/* 类型：查看器注册的名字，紧跟归属，一眼看出这份变量是什么结构 */}
-                        {entry.type && <span className={styles.typeTag}>{typeLabel(entry)}</span>}
-                        {entry.workflow_id && (
-                          <>
-                            {/* 「图」只是标识，名字单独一个标签：混在一个 chip 里读起来像一坨 */}
-                            <span className={styles.workflowTag}>图</span>
-                            <span
-                              className={styles.workflowName}
-                              title={`图 id：${entry.workflow_id}`}
-                            >
-                              {entry.workflow_name || entry.workflow_id}
-                            </span>
-                          </>
+                      </td>
+                      <td className={styles.ttl}>{formatTtl(entry.ttl)}</td>
+                      <td>
+                        {entry.type && (
+                          <VariableValueViewer
+                            entry={entry}
+                            onChanged={() => query.refresh(true)}
+                            className={styles.viewerCell}
+                          />
                         )}
-                        <span className={styles.ttl}>{formatTtl(entry.ttl)}</span>
-                      </div>
-                      <VariableValueViewer entry={entry} onChanged={() => query.refresh(true)} />
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             <Pagination
               page={query.page}
