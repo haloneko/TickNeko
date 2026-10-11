@@ -18,7 +18,7 @@ from ..auth.dependencies import CurrentUserDep
 from ..onebot.dependencies import ensure_can_touch
 from ..workflow.dependencies import WorkflowStoreDep, owner_filter_of
 from .dependencies import CacheDep
-from .responses import VariableData, VariablePage
+from .responses import VariableData, VariablePage, VariableSummary
 
 router = APIRouter(prefix="/variables", tags=["变量查看"])
 ALL_SCOPES: tuple[str, ...] = ("graph", "account")
@@ -97,7 +97,7 @@ async def _context(
 @router.get(
     "",
     response_model=ApiResponse[VariablePage],
-    summary="列出逻辑变量",
+    summary="列出变量（只含元数据）",
     responses=_RESPONSES,
 )
 async def list_variables(
@@ -129,7 +129,7 @@ async def list_variables(
             offset=offset,
         )
     )
-    items = [VariableData.from_snapshot(snapshot) for snapshot in snapshots]
+    items = [VariableSummary.from_snapshot(snapshot) for snapshot in snapshots]
     return ApiResponse[VariablePage](
         data=VariablePage(items=items, total=total), trace_id=trace_id_of(request)
     )

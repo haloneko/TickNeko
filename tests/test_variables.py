@@ -149,12 +149,11 @@ class TestVariables:
         rows = {(item["scope"], item["owner_id"], item["key"]): item for item in page["items"]}
         graph_row = rows[("graph", admin_id, "计数")]
         assert graph_row["workflow_id"] == graph.id
-        assert graph_row["value"] == "1"
+        assert "value" not in graph_row  # 列表只列元数据，值走详情接口
         assert graph_row["ttl"] is None  # 没设 TTL = 永不过期（JSON 里没有 Infinity）
         account_row = rows[("account", admin_id, "日签")]
         assert account_row["workflow_id"] == ""  # 账号级不挂在某张图上
-        assert account_row["value"] == "开"
-        assert rows[("account", plain_id, "计数")]["value"] == "3"
+        assert "value" not in account_row
 
         # 普通用户：只看得到自己那条（图级的图不是他的，也看不到）
         page = page_of(await env.client.get(VARIABLES_PATH, headers=auth(plain_token)))
@@ -176,9 +175,41 @@ class TestVariables:
         page = page_of(await env.client.get(VARIABLES_PATH, headers=auth(admin_token)))
         assert page["total"] == 3
         rows = {item["key"]: item for item in page["items"]}
-        assert rows["开关"]["value"] == "开"
-        assert json.loads(rows["配置"]["value"]) == {"主题色": "蓝", "模式": "夜间"}
-        assert json.loads(rows["队列"]["value"]) == ["A", "B"]
+        assert rows["开关"]["type"] == "str"
+        assert rows["配置"]["type"] == "dict"
+        assert rows["队列"]["type"] == "list"
+
+        # 内容照常走详情接口：hash 走 hash_get_all、list 走 list_range，都放进 data
+        async def data_of(key: str) -> object:
+            data = page_of(
+                await env.client.get(
+                    f"{VARIABLES_PATH}/value",
+                    headers=auth(admin_token),
+                    params={"scope": "account", "owner_id": admin_id, "key": key},
+                )
+            )
+            return data["data"]
+
+        assert await data_of("开关") == "开"
+        assert await data_of("配置") == {"主题色": "蓝", "模式": "夜间"}
+        assert await data_of("队列") == ["A", "B"]
+
+    async def test_list_returns_metadata_only(self, env: Env) -> None:
+        """列表接口只列元数据：类型照常解析，但本体值 / 长度不读不给（内容走 /value）。"""
+        admin_token, admin_id = await login(env.client, ADMIN)
+        await env.cache.set(f"workflow:acct:{admin_id}:计数", "abc")
+        await env.cache.list_push_right(f"workflow:acct:{admin_id}:队列", "A", "B")
+
+        page = page_of(await env.client.get(VARIABLES_PATH, headers=auth(admin_token)))
+        assert page["total"] == 2
+        rows = {item["key"]: item for item in page["items"]}
+        # 类型来自来源反查 / 探测，不读本体也能给；值、长度、结构化数据一律不下发
+        assert rows["计数"]["type"] == "str"
+        assert "value" not in rows["计数"]
+        assert rows["队列"]["type"] == "list"
+        assert "data" not in rows["队列"]
+        assert "length" not in rows["队列"]
+        assert "value" not in rows["队列"]
 
     async def test_plain_user_cannot_ask_for_someone_else(self, env: Env) -> None:
         """普通用户显式写别人的归属 -> 403（和日志 / 工作流列表一个口径）。"""
@@ -315,7 +346,10 @@ class TestVariableViewers:
         page = page_of(await env.client.get(VARIABLES_PATH, headers=auth(token), params={"limit": 1}))
         assert page["total"] == 2
         assert page["items"][0]["key"] == "a"
-        assert (page["items"][0]["type"], page["items"][0]["data"], page["items"][0]["length"]) == ("list", ["a", "a", "b"], 3)
+        # 列表只列元数据：类型仍在，本体值 / 长度不下发
+        assert page["items"][0]["type"] == "list"
+        assert "data" not in page["items"][0]
+        assert "length" not in page["items"][0]
         page = page_of(await env.client.get(VARIABLES_PATH, headers=auth(token), params={"limit": 1, "offset": 1}))
         assert [row["key"] for row in page["items"]] == ["b"]
         assert page_of(await env.client.get(VARIABLES_PATH, headers=auth(token), params={"query": ":meta"}))["total"] == 0

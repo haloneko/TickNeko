@@ -240,6 +240,25 @@ class VariableService:
             view = await resolution.viewer.view()
         return await self._snapshot(context, view)
 
+    async def summary(self, context: VariableContext) -> VariableSnapshot:
+        """列表页的轻量元数据：只反查来源定类型，不读本体值（data / length 为空）。"""
+        resolution = await self.resolve(context)
+        if resolution.viewer is None:
+            if not await self.cache.exists(context.full_key):
+                raise VariableNotFound("变量不存在")
+            view = VariableView(None, reason=resolution.reason)
+        else:
+            viewer = resolution.viewer
+            view = VariableView(
+                type=viewer.view_type,
+                data=None,
+                length=None,
+                editable=viewer.editable,
+                reason=viewer.reason,
+                label=viewer.label,
+            )
+        return await self._snapshot(context, view)
+
     async def page(
         self,
         *,
@@ -249,11 +268,12 @@ class VariableService:
         limit: int,
         offset: int,
     ) -> tuple[list[VariableSnapshot], int]:
+        """变量清单：只列元数据、不读本体值（一个接口一个职责，详情走 view()）。"""
         rows = await self.discover(scope=scope, keyword=keyword, owner=owner)
         snapshots: list[VariableSnapshot] = []
         for row in rows[offset : offset + limit]:
             try:
-                snapshots.append(await self.view(row))
+                snapshots.append(await self.summary(row))
             except VariableNotFound:
                 pass  # 枚举后过期的本体不把整页变成 404；总数是本次发现时的快照。
         return snapshots, len(rows)

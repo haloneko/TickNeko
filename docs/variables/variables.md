@@ -88,15 +88,15 @@ workflow:acct:{owner_id}:{name}
 
 | 方法 / 路径 | 作用 |
 |---|---|
-| `GET /api/variables` | 原有 `owner_id / scope / query / limit / offset` 查询与分页 |
-| `GET /api/variables/value` | 查看一个逻辑变量 |
+| `GET /api/variables` | 原有 `owner_id / scope / query / limit / offset` 查询与分页；只列**元数据**，不读本体值 |
+| `GET /api/variables/value` | 查看一个逻辑变量（完整字段） |
 | `POST /api/variables/add` | 新增或保存，整份 JSON 对象交给查看器 |
 
 后两个接口通过 query 定位：图级传 `scope=graph&workflow_id=...&key=...`；账号级传
 `scope=account&owner_id=...&key=...`，省略账号归属时取当前用户。图归属从工作流存储查，
 调用方不能指定或伪造。管理员可操作所有归属与已删图的孤儿变量，普通用户只能操作自己的。
 
-沿用 `ApiResponse` 外壳，业务数据示例：
+沿用 `ApiResponse` 外壳，详情接口业务数据示例：
 
 ```json
 {
@@ -105,17 +105,20 @@ workflow:acct:{owner_id}:{name}
   "workflow_id": "some-graph",
   "key": "队列",
   "type": "list",
+  "type_label": "列表",
   "data": ["a", "a", "b"],
   "length": 3,
   "editable": true,
   "reason": "",
-  "value": "[\"a\", \"a\", \"b\"]",
   "ttl": null
 }
 ```
 
-`value` 保留给已有只读调用方，编辑器使用 `type / data / editable`。`length` 来自 list
+内容都在 `data`：str 是文本本身，json / list / dict 是解析后的对象。`length` 来自 list
 本体；其它类型为 null。`ttl=null` 表示无剩余过期秒数，已有本体的编辑保留其 TTL。
+
+列表接口 `GET /variables` 只下发元数据：条目不含 `data` / `length`（不读本体值），
+保留 `type / type_label / editable / reason / ttl` 等；看内容走 `/value`。
 
 | 修改请求 | 语义 |
 |---|---|
