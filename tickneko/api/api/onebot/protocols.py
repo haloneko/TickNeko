@@ -158,8 +158,11 @@ class TokenRegistry(Protocol):
 class OneBotLike(Protocol):
     """接口层要用的 OneBot 服务端（对应 :class:`tickneko.platforms.onebot.OneBotServer`）。"""
 
-    def roster(self, *, id: str | None = None) -> tuple[ClientLike, ...]:
-        """在线客户端列表（快照）；给 ``id`` 就只看那一个归属（谁的）下的。"""
+    def roster(
+        self, *, id: str | None = None, bot_id: str | None = None
+    ) -> tuple[ClientLike, ...]:
+        """在线客户端列表（快照）；给 ``id`` 就只看那一个归属（谁的）下的；
+        给 ``bot_id`` 只看那台机器人下的（二选一，``bot_id`` 优先）。"""
         ...
 
     async def kick(self, client_id: str, *, revoke: bool = False) -> bool:

@@ -331,9 +331,11 @@ class OneBotAdapter:
         """当前连着的客户端（快照）；供观测 / 测试用。"""
         return self._server.connections
 
-    def roster(self, *, id: str | None = None) -> tuple[ClientEntry, ...]:
+    def roster(
+        self, *, id: str | None = None, bot_id: str | None = None
+    ) -> tuple[ClientEntry, ...]:
         """在线客户端列表（快照，**平台口径**：``self_id`` 仍是 ``int | None``）。"""
-        return self._server.roster(id=id)
+        return self._server.roster(id=id, bot_id=bot_id)
 
     async def kick(self, client_id: str, *, revoke: bool = False) -> bool:
         """踢掉一个客户端；``revoke=True`` 连令牌一起吊销。"""
