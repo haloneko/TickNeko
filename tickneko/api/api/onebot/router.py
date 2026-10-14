@@ -122,7 +122,7 @@ async def _fetch_token(server: OneBotLike, users: UserStore, token_id: str) -> T
     if record is None:
         raise ApiError(ErrorCode.HTTP_ERROR, "没有这个令牌", status_code=status.HTTP_404_NOT_FOUND)
     nickname = await _nickname_of(users, record.owner_id)
-    clients = server.roster(id=record.id)
+    clients = server.roster(bot_id=record.id)
     return _token_of(record, nickname, online=bool(clients), clients=clients)
 
 
@@ -256,12 +256,13 @@ async def list_tokens(
     records = await registry.list_records(owner_id=None if is_admin(user) else user.user.id)
     # 昵称一次查齐（别一条一次查询）：查不到的 owner_id 回落空串
     names = await _nicknames_of(users, [record.owner_id for record in records])
-    # 在线状态是派生态：每条机器人聚合一下服务端在线列表（走 _by_owner 的 hash 索引，
-    # 只查自己那格，不扫全集），把它连着的客户端也一并带在响应里
+    # 在线状态是派生态：按**机器人**（bot_id = record.id）聚合在线列表（走 _by_bot 的
+    # hash 索引，只查那一格，不扫全集），把它连着的客户端也一并带在响应里。
+    # 按归属聚合是 bug：一个用户多台机器人时，只要一台连上，全部机器人都会显示在线。
     data: list[TokenData] = []
     for record in records:
         nickname = names.get(record.owner_id, "")
-        clients = server.roster(id=record.owner_id)
+        clients = server.roster(bot_id=record.id)
         data.append(_token_of(record, nickname, online=bool(clients), clients=clients))
     return ApiResponse[list[TokenData]](data=data, trace_id=trace_id)
 

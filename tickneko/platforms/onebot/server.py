@@ -281,13 +281,21 @@ class OneBotServer:
         return tuple(self._by_client_id.values())
 
     # ------------------------------------------------------------------ 在线列表
-    def roster(self, *, id: str | None = None) -> tuple[ClientEntry, ...]:
+    def roster(
+        self, *, id: str | None = None, bot_id: str | None = None
+    ) -> tuple[ClientEntry, ...]:
         """在线客户端列表（快照）：路由器「已连接设备」那一张表。
 
         :param id: 只看某个归属（谁的）下的客户端；``None`` 表示全部。
+        :param bot_id: 只看某台机器人（bot_id）下的客户端；与 ``id`` 二选一，给了
+            ``bot_id`` 就以它为准（一个用户多台机器人时，在线状态要按机器人分开算）。
         """
-        # 按归属取走 hash 索引那一格，不扫全集
-        conns = self._by_client_id.values() if id is None else self._by_owner.get(id, set())
+        if bot_id is not None:
+            # 按机器人取走 hash 索引那一格，不扫全集（_by_bot 以 bot_id 为键）
+            conns = self._by_bot.get(bot_id, set())
+        else:
+            # 按归属取走 hash 索引那一格，不扫全集
+            conns = self._by_client_id.values() if id is None else self._by_owner.get(id, set())
         return tuple(conn.entry() for conn in conns)
 
     async def kick(self, client_id: str, *, revoke: bool = False) -> bool:

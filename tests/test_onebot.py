@@ -308,6 +308,25 @@ async def test_without_registry_accepts_anonymous() -> None:
 
 
 # --------------------------------------------------------------------------- 在线列表 / 踢人 / 吊销
+async def test_roster_filters_by_bot_id() -> None:
+    """同一归属两台机器人，只有一台连上时：``roster(bot_id=...)`` 只回那一台的连接。"""
+    registry = await memory_registry()
+    first = await registry.issue("alice", account="一号")
+    second = await registry.issue("alice", account="二号")
+
+    async with opened_server(registry) as server:
+        async with connect(ws_url(port_of(server), first.token)):
+            assert await wait_until(lambda: len(server.roster()) == 1)
+
+            # 按机器人过滤：连的那台有一条，没连的那台是空的（而不是把同归属的都算上）
+            assert [item.bot_id for item in server.roster(bot_id=first.record.id)] == [
+                first.record.id
+            ]
+            assert server.roster(bot_id=second.record.id) == ()
+            # 按归属看仍是那一整格（语义不变，多实例后归属下可以有多条连接）
+            assert len(server.roster(id="alice")) == 1
+
+
 async def test_kick_disconnects_client() -> None:
     """踢下线：客户端那条连接被断开，在线列表里也消失。"""
     registry = await memory_registry()
@@ -520,6 +539,36 @@ async def test_management_lists_clients_and_manages_tokens() -> None:
                 f"/api/onebot/tokens/{issued_data.record.id}", headers=headers
             )
             assert again.status_code == 404
+
+
+async def test_management_online_status_is_per_bot() -> None:
+    """同一归属两台机器人，只连一台：令牌列表里只有那台 online，另一台保持离线。
+
+    曾经按归属（owner_id）聚合在线连接，导致一台连上、同归属全部显示在线。
+    """
+    registry = await memory_registry()
+    first = await registry.issue("u-admin", account="一号")
+    second = await registry.issue("u-admin", account="二号")
+
+    async with opened_server(registry) as server:
+        app = api_app(server)
+        async with api_client(app) as client:
+            headers = {"Authorization": f"Bearer {await login(client)}"}
+
+            # 只让第一台连上
+            async with connect(ws_url(port_of(server), first.token)):
+                assert await wait_until(lambda: len(server.roster()) == 1)
+
+                tokens = await client.get("/api/onebot/tokens", headers=headers)
+                assert tokens.status_code == 200, tokens.text
+                rows = ApiResponse[list[TokenData]].model_validate(tokens.json()).data
+
+            by_id = {row.id: row for row in rows}
+            assert set(by_id) == {first.record.id, second.record.id}
+            assert by_id[first.record.id].online is True  # 连的那台：在线
+            assert by_id[first.record.id].clients[0].owner_id == "u-admin"
+            assert by_id[second.record.id].online is False  # 没连的那台：离线
+            assert by_id[second.record.id].clients == []
 
 
 async def test_management_toggles_token_enabled() -> None:
