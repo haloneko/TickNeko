@@ -69,3 +69,27 @@ export interface LogPage {
 export function searchLogs(params: LogSearchParams = {}) {
   return http.get<LogPage>('/logs', { params })
 }
+
+/** 清理参数：范围（owner_id）+ 时间线（before）。都可不传，含义见 clearLogs 注释。 */
+export interface ClearLogsParams {
+  /** 只删这个归属名下的；不传 = 普通用户强制自己、管理员清全部（含公共） */
+  owner_id?: string
+  /** 删除早于该时刻的日志（Unix 秒字符串）；不传 = 三天前；晚于三天前会 422 */
+  before?: string
+}
+
+/** 清理结果：删了几条、实际生效的清理线（给提示用）。 */
+export interface ClearLogsResult {
+  deleted: number
+  before: string
+}
+
+/**
+ * 清理历史日志（POST /api/logs/clear）：
+ * - **只清落库那份**（文件 / 控制台出口不动）；
+ * - **只清三天前的**：后端强制 before 不得晚于三天前，三天内的日志删不掉；
+ * - 范围与检索同一个口径：普通用户后端强制只清自己名下的，管理员不传 owner_id 清全部。
+ */
+export function clearLogs(params: ClearLogsParams = {}) {
+  return http.post<ClearLogsResult>('/logs/clear', params)
+}

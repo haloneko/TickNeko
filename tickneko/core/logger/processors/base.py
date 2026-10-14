@@ -220,6 +220,16 @@ class BaseLogProcessor(abc.ABC):
         ``owner_id`` 精确匹配所有者：``None`` 不限（默认），空串 = 只要公共的。
         """
 
+    async def delete_before(
+        self, *, before: TimestampLike, owner_id: str | None = None
+    ) -> int:
+        """清理历史日志：删除 ``before`` 之前（含归属过滤）的记录，返回删除条数。
+
+        默认实现是**什么都不删、返回 0**：清理是数据库那份的特权（文件 / 控制台不留存
+        可清的历史，也没有统一的删除语义）。要支持清理的出口自己覆写。
+        """
+        return 0
+
     # ------------------------------------------------------------------ 生命周期
     async def start(self) -> None:
         """启动处理机：打开后端（:meth:`_on_start`）并开启定时刷盘。

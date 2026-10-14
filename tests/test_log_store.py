@@ -202,6 +202,29 @@ async def test_delete_before_removes_only_older() -> None:
         await store.delete_before(None)  # 没有明确时刻就是非法输入
 
 
+async def test_delete_before_can_filter_by_owner() -> None:
+    """按归属过滤：给 ``owner_id`` 只删那个归属名下的（公共日志不动）。"""
+    store = await memory_store()
+    base = time.time()
+    await store.add(
+        [
+            record("管理员的旧日志", owner_id="u-admin", moment=base - 100),
+            record("机器人的旧日志", owner_id="u-robot", moment=base - 100),
+            record("框架的旧日志", moment=base - 100),  # 公共
+            record("机器人的新日志", owner_id="u-robot", moment=base),  # 三天内不清
+        ]
+    )
+
+    assert await store.delete_before(base - 50, owner_id="u-robot") == 1
+    remaining = {r.message for r in (await store.search()).records}
+    assert remaining == {"管理员的旧日志", "框架的旧日志", "机器人的新日志"}
+
+    # 空串 = 只删公共日志
+    assert await store.delete_before(base - 50, owner_id="") == 1
+    remaining = {r.message for r in (await store.search()).records}
+    assert remaining == {"管理员的旧日志", "机器人的新日志"}
+
+
 async def test_broken_extra_does_not_break_search() -> None:
     """库里 extra 坏了（手工改过 / 老数据）：退回原文，而不是让整次检索炸掉。"""
     store = await memory_store()

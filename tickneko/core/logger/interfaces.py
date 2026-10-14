@@ -66,7 +66,9 @@ class LogStore(Protocol):
         """
         ...
 
-    async def delete_before(self, before: TimestampLike) -> int:
+    async def delete_before(
+        self, before: TimestampLike, owner_id: str | None = None
+    ) -> int:
         """清理历史日志：删除 ``before`` 时刻之前的记录，返回删除行数。
 
         约定：``before`` 是宽松输入（时间戳 / ISO 字符串 /
@@ -78,5 +80,7 @@ class LogStore(Protocol):
 
         :param before: 删除该时刻之前的日志；``None`` 属于非法输入，
             应抛 :class:`ValueError`。
+        :param owner_id: 只删这个归属名下的日志；``None`` 不过滤（删所有归属，
+            含公共），空串 = 只删公共日志（框架自身、没有归属的那部分）。
         """
         ...

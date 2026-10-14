@@ -46,3 +46,14 @@ class LogPage(BaseModel):
     items: list[LogData] = Field(description="本页日志条目")
     #: 命中条件的**总条数**（不受本页 ``limit`` / ``offset`` 限制）
     total: int = Field(description="命中总条数")
+
+
+class ClearLogsData(BaseModel):
+    """清理日志的结果：删了几条、实际生效的清理线（给前端提示用）。"""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    #: 删除条数
+    deleted: int = Field(description="删除条数")
+    #: 实际生效的清理线（Unix 秒字符串）：早于它的日志被删；不传时后端按三天前算
+    before: str = Field(description="实际生效的清理线（Unix 秒）")

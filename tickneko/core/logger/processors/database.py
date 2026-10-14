@@ -95,6 +95,14 @@ class DatabaseLogProcessor(BaseLogProcessor):
             offset=offset,
         )
 
+    # ------------------------------------------------------------------ 清理
+    @override
+    async def delete_before(
+        self, *, before: TimestampLike, owner_id: str | None = None
+    ) -> int:
+        # 删除与归属过滤都在 store 那边一次做完（一条 DELETE），这里只转手
+        return await self._store.delete_before(before, owner_id)
+
     # ------------------------------------------------------------------ 状态
     @property
     @override

@@ -7,10 +7,11 @@
 
 from __future__ import annotations
 
-from .responses import LogData, LogPage
+from .responses import ClearLogsData, LogData, LogPage
 from .router import router as log_router
 
 __all__ = [
+    "ClearLogsData",
     "LogData",
     "LogPage",
     "log_router",

@@ -718,6 +718,37 @@ class BaseLogger(_LevelMethodsMixin):
             deduped.append(record)
         return LogSearchResult(records=deduped[offset : offset + limit], total=total)
 
+    async def delete_before(
+        self,
+        before: TimestampLike,
+        *,
+        owner_id: str | None = None,
+        processors: Sequence[str] | None = None,
+    ) -> int:
+        """清理历史日志：扇出到目标出口（默认全部），各出口返回删除条数，汇总返回。
+
+        只统计**支持清理**的出口（默认实现是 0），所以总数就是真正删掉的行数；
+        某个出口失败只记日志、不算数，不影响其它出口 —— 与 ``search`` / ``flush``
+        同一个「尽力而为」口径。
+        """
+        targets = self._select_processors(processors)
+        if not targets:
+            return 0
+        results = await asyncio.gather(
+            *(
+                processor.delete_before(before=before, owner_id=owner_id)
+                for processor in targets
+            ),
+            return_exceptions=True,
+        )
+        total = 0
+        for result in results:
+            if isinstance(result, BaseException):
+                _fallback.exception("清理处理机失败", exc_info=result)
+                continue
+            total += int(result)
+        return total
+
     def _select_processors(
         self, names: Sequence[str] | None = None
     ) -> list[BaseLogProcessor]:
@@ -928,6 +959,18 @@ class BoundLogger(_LevelMethodsMixin):
             limit=limit,
             offset=offset,
             processors=processors,
+        )
+
+    async def delete_before(
+        self,
+        before: "TimestampLike",
+        *,
+        owner_id: str | None = None,
+        processors: "Sequence[str] | None" = None,
+    ) -> int:
+        """清理：走源实例那份（视图不持有任何自己的状态，删的东西与它无异）。"""
+        return await self._logger.delete_before(
+            before, owner_id=owner_id, processors=processors
         )
 
     def _merge(
@@ -1165,6 +1208,18 @@ class ChildLogger(_LevelMethodsMixin):
             limit=limit,
             offset=offset,
             processors=processors,
+        )
+
+    async def delete_before(
+        self,
+        before: "TimestampLike",
+        *,
+        owner_id: str | None = None,
+        processors: "Sequence[str] | None" = None,
+    ) -> int:
+        """清理：走 root 那份（节点不持有状态，删的东西与它无异）。"""
+        return await self._root.delete_before(
+            before, owner_id=owner_id, processors=processors
         )
 
     @override

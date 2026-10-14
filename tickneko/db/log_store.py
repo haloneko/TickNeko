@@ -264,20 +264,25 @@ class SqlLogStore:
         return LogSearchResult(records=records, total=total)
 
     # ------------------------------------------------------------------ 清理
-    async def delete_before(self, before: TimestampLike) -> int:
+    async def delete_before(
+        self, before: TimestampLike, owner_id: str | None = None
+    ) -> int:
         """删除 ``before`` 之前的历史日志，返回删除条数。
 
         ``before`` 是宽松输入，先归一化成 Unix 时间戳再比；``None`` 属非法输入。
+        ``owner_id`` 给 ``None`` 不过滤归属（删所有归属，含公共），给空串只删公共日志，
+        给具体 id 只删那个归属名下的 —— 「只能清自己的 / 管理员清全部」就在这层落定。
         """
         cutoff = normalize_timestamp(before)
         if cutoff is None:
             raise ValueError("delete_before 需要一个明确的时刻，不能是 None")
+        statement = delete(LogTable).where(col(LogTable.timestamp) < cutoff)
+        if owner_id is not None:
+            statement = statement.where(col(LogTable.owner_id) == owner_id)
         # DML 走引擎而不是会话：SQLModel 的 AsyncSession 已不认 execute（要 exec），而 exec
         # 只收检索语句、拿不回行数；引擎这条一次往返、行数也拿得到（与 ensure_schema 同风格）
         async with self._engine.begin() as conn:
-            result = await conn.execute(
-                delete(LogTable).where(col(LogTable.timestamp) < cutoff)
-            )
+            result = await conn.execute(statement)
             return int(result.rowcount or 0)
 
 
