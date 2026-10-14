@@ -7,7 +7,7 @@ from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Body, Query, Request, status
 
-from tickneko.workflow.nodes.variable_viewer import VariableContext
+from tickneko.variables import VariableContext, VariableTypeConflict
 
 from ...common.dependencies import trace_id_of
 from ...common.errors import ApiError, ErrorCode, HttpStatus
@@ -65,6 +65,11 @@ async def _call(operation: Awaitable[_T]) -> _T:
             ErrorCode.HTTP_ERROR, str(exc), status_code=status.HTTP_404_NOT_FOUND
         ) from exc
     except VariableNotEditable as exc:
+        raise ApiError(
+            ErrorCode.HTTP_ERROR, str(exc), status_code=status.HTTP_409_CONFLICT
+        ) from exc
+    except VariableTypeConflict as exc:
+        # 与运行时同一套守卫：写前拦截的「类型冲突」走同一个 409，文案也归一
         raise ApiError(
             ErrorCode.HTTP_ERROR, str(exc), status_code=status.HTTP_409_CONFLICT
         ) from exc
@@ -153,7 +158,12 @@ async def view_variable(
 ) -> ApiResponse[VariableData]:
     service = VariableService(cache, store)
     context = await _context(
-        service, user, scope=scope, key=key, owner_id=owner_id, workflow_id=workflow_id
+        service,
+        user,
+        scope=scope,
+        key=key,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
     )
     snapshot = await _call(service.view(context))
     return ApiResponse[VariableData](
@@ -180,7 +190,12 @@ async def add_variable(
 ) -> ApiResponse[VariableData]:
     service = VariableService(cache, store)
     context = await _context(
-        service, user, scope=scope, key=key, owner_id=owner_id, workflow_id=workflow_id
+        service,
+        user,
+        scope=scope,
+        key=key,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
     )
     snapshot = await _call(service.add(context, params))
     return ApiResponse[VariableData](
@@ -206,7 +221,12 @@ async def delete_variable(
 ) -> ApiResponse[dict[str, bool]]:
     service = VariableService(cache, store)
     context = await _context(
-        service, user, scope=scope, key=key, owner_id=owner_id, workflow_id=workflow_id
+        service,
+        user,
+        scope=scope,
+        key=key,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
     )
     await _call(service.delete(context))
     return ApiResponse[dict[str, bool]](

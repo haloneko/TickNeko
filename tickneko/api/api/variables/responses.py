@@ -9,7 +9,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from tickneko.workflow.nodes.variable_viewer import VariableViewType
+from tickneko.variables import VariableViewType
 
 from ...services.variables import VariableSnapshot
 
@@ -27,7 +27,7 @@ class VariableData(BaseModel):
     workflow_id: str = Field(default="", description="所属工作流 id（账号级为空串）")
     #: 所属工作流的名字；图级变量才有，查不到（图已被删）是空串
     workflow_name: str = Field(default="", description="所属工作流名（图级；查不到为空串）")
-    #: 变量名（缓存键前缀之后的那一段）
+    #: 变量名（键的最后一段；变量名即身份，见 docs/variables/variables.md）
     key: str = Field(description="变量名")
     type: VariableViewType | None = Field(default=None, description="查看器展示类型；null = 不支持查看")
     #: 查看器注册时自带的中文名：同一个 type 下不同节点的结构靠它区分（如「列表」与「列表·计数」）
@@ -46,7 +46,7 @@ class VariableData(BaseModel):
         return cls(
             scope=context.scope, owner_id=context.owner_id, workflow_id=context.workflow_id,
             workflow_name=snapshot.workflow_name,
-            key=context.key, type=view.type, type_label=view.label,
+            key=context.name, type=view.type, type_label=view.label,
             data=view.data, length=view.length,
             editable=view.editable, reason=view.reason, ttl=snapshot.ttl,
         )
@@ -78,7 +78,7 @@ class VariableSummary(BaseModel):
         return cls(
             scope=context.scope, owner_id=context.owner_id, workflow_id=context.workflow_id,
             workflow_name=snapshot.workflow_name,
-            key=context.key, type=view.type, type_label=view.label,
+            key=context.name, type=view.type, type_label=view.label,
             editable=view.editable, reason=view.reason, ttl=snapshot.ttl,
         )
 
