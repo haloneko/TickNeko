@@ -19,10 +19,10 @@ config:
     ``default``       数据入口：``get`` 读不到时用的默认值（手填兜底，也能接线）；
     ``cache_value``   出口：``get`` 取到的值 / ``set`` 写下去的值（读不到就是默认值，没填才是空串）。
 
-缓存键**用前缀区分作用域**（同一个缓存里互不打扰）::
+缓存键**用作用域 + 变量名分段**（变量名即身份，键怎么拼由变量中枢定）::
 
-    workflow   workflow:graph:{图 id}:{变量名}      例  workflow:graph:3ab9c2…:计数
-    account    workflow:acct:{账号 id}:{变量名}     例  workflow:acct:u-admin:日签开关
+    workflow   workflow:graph:{图 id}:{变量名}   例  workflow:graph:3ab9c2…:本月
+    account    workflow:acct:{账号 id}:{变量名}  例  workflow:acct:u-admin:本月
 
 口径：
 
@@ -49,18 +49,22 @@ from __future__ import annotations
 
 from typing import Any
 
+from tickneko.variables import (
+    StringViewer,
+    VariableContext,
+    VariableRule,
+    text_parameter,
+)
+
 from ..models import ValidationIssue, WorkflowNode
 from .base import (
     TRIGGER_PORT,
     ConfigField,
     NodeExecutionContext,
     PortSpec,
-    cache_key,
     input_value,
 )
 from .registry import register_node
-from .variable_viewer import VariableContext, VariableRule, text_parameter
-from .variable_viewers import StringViewer
 
 #: 允许的动作，**顺序即画布下拉顺序**
 CACHE_ACTION_ORDER: tuple[str, ...] = ("get", "set")
@@ -121,6 +125,7 @@ def _clip(raw: str) -> str:
 class CacheViewer(StringViewer):
     """cache 的写动作注册文本查看器，保留运行时的标量编码。"""
 
+    type_id = "cache"
     label = "缓存"
     priority = 100
     rules = (VariableRule(actions=("set",)),)
@@ -171,21 +176,24 @@ async def exec_cache(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str,
     if scope not in CACHE_SCOPE_ORDER:
         raise ValueError(f"节点 {node.id} 的作用域不合法：{scope!r}")
 
-    key = str(input_value(node, ctx, "key", default="")).strip()
-    if not key:
+    name = str(input_value(node, ctx, "key", default="")).strip()
+    if not name:
         raise ValueError(f"节点 {node.id} 的 key 为空（入口没接线，config 里也没填）")
-    if ":" in key:
+    if ":" in name:
         raise ValueError(
-            f"节点 {node.id} 的变量名 {key!r} 不能包含冒号"
+            f"节点 {node.id} 的变量名 {name!r} 不能包含冒号"
             "手填或上游送来的都不行）"
         )
 
-    full_key = cache_key(node, ctx, scope, key)
+    variable = ctx.variable(scope, name)
+    full_key = variable.full
 
     if action == "set":
         raw = input_value(node, ctx, "value", default="")
         text = "" if raw is None else str(raw)
-        await ctx.cache.set(full_key, text)
+        await ctx.write_variable(
+            variable, CacheViewer.type_id, lambda full: ctx.cache.set(full, text)
+        )
         ctx.logger.info(f"[cache:{node.id}] set {full_key} = {_clip(text)}")
         ctx.log.append(f"[cache] {node.id}: set {full_key} = {_clip(text)}")
         return {"cache_value": text}

@@ -32,19 +32,20 @@ config:
     ds-list-pop-left（队头弹出）  入 ``key`` / ``default``          出 ``obj_out`` / ``value_out``
     ds-list-length（长度）        入 ``key``                       出 ``obj_out`` / ``count``
 
-缓存键用前缀区分作用域（同 cache 节点，互不打扰）::
+缓存键用作用域 + 变量名分段（同 cache 节点，变量名即身份）::
 
     workflow   workflow:graph:{图 id}:{变量名}
     account    workflow:acct:{账号 id}:{变量名}
 
 一份逻辑变量在缓存里拆成两个物理键（Redis 的 key 类型互斥，list 和 hash 不能共存）：
-    ``<key>``        队列本体（list 结构，走 RPUSH / LRANGE / LLEN / RPOP / LPOP 原子操作）；
-    ``<key>:meta``   计数辅助（hash 结构，文本元素 -> 出现次数），由队列动作自动联动。
+    ``<key>``          队列本体（list 结构，走 RPUSH / LRANGE / LLEN / RPOP / LPOP 原子操作）；
+    ``<key>:counts``   **本节点私有的**计数辅助（hash 结构，文本元素 -> 出现次数），由队列动作自动联动。
+    ``<key>:meta``     通用属性表（由变量中枢维护，本节点不碰）。
 
 联动规则（"添加计数加、弹出计数减、长度算 list、contains 走索引"）：
-* ``append`` / ``push_left``：元素推进队列，``meta`` 对应元素的出现次数 **+1**；
+* ``append`` / ``push_left``：元素推进队列，``counts`` 对应元素的出现次数 **+1**；
 * ``pop`` / ``pop_left``：从队列弹出，出现次数 **-1**（归零删字段，hash 删空后键消失）；
-* ``contains``：直接 ``HEXISTS <key>:meta`` —— **O(1)**，不扫队列；
+* ``contains``：直接 ``HEXISTS <key>:counts`` —— **O(1)**，不扫队列；
 * ``length``：返回 **list 实际长度**（``LLEN``），不读计数。
 
 口径：
@@ -78,7 +79,7 @@ config:
     双端队列: ds-list-push-left 塞队头 -> ds-list-pop 从队尾取
     判重/查在不在: ds-list-contains(item) -> true 出口接处理逻辑，false 出口接忽略（O(1) 走索引）
 
-查看器与旧 :idx 的按需重建规则见 ``docs/variables/variables.md``；查看 / probe 不修复数据。
+查看器与计数段的按需重建规则见 ``docs/variables/variables.md``；查看 / probe 不修复数据。
 """
 from __future__ import annotations
 
@@ -87,6 +88,7 @@ from typing import Any
 
 from tickneko.core.cache.interfaces import CacheBackend
 from tickneko.core.cache.models import CacheError
+from tickneko.variables import ListViewer, VariableContext, VariableKey, text_parameter
 
 from ..models import ValidationIssue, WorkflowNode
 from .base import (
@@ -95,18 +97,18 @@ from .base import (
     NodeExecutionContext,
     NodeFailure,
     PortSpec,
-    cache_key,
     input_value,
 )
 from .registry import register_node
-from .variable_viewer import VariableContext, text_parameter
-from .variable_viewers import ListViewer
 
 #: 允许的作用域，**顺序即画布下拉顺序**
 DS_LIST_SCOPE_ORDER: tuple[str, ...] = ("workflow", "account")
 
 #: 日志里展示键 / 值时的截断长度（长值不刷屏）
 CLIP_CHARS: int = 80
+
+#: **本节点私有的**结构段名：元素出现次数的存储键 = 中枢的 ``{本体}:{段名}``，见 docs/variables/variables.md
+COUNTS_SEGMENT: str = "counts"
 
 
 def validate_ds_list_node(node: WorkflowNode) -> list[ValidationIssue]:
@@ -158,29 +160,42 @@ def _var_name(node: WorkflowNode, ctx: NodeExecutionContext) -> str:
     return str(input_value(node, ctx, "key", default="")).strip()
 
 
-def _prepare(node: WorkflowNode, ctx: NodeExecutionContext) -> str:
-    """解析并校验 scope / key，返回队列本体缓存键；配置错误当场抛。"""
+def _prepare(node: WorkflowNode, ctx: NodeExecutionContext) -> VariableKey:
+    """解析并校验 scope / key，返回变量的身份（键由变量中枢拼）；配置错误当场抛。"""
     scope = str(node.config.get("scope", "")).strip() or "workflow"
     if scope not in DS_LIST_SCOPE_ORDER:
         raise ValueError(f"节点 {node.id} 的作用域不合法：{scope!r}")
 
-    key = _var_name(node, ctx)
-    if not key:
+    name = _var_name(node, ctx)
+    if not name:
         raise ValueError(f"节点 {node.id} 的 key 为空（入口没接线，config 里也没填）")
-    if ":" in key:
+    if ":" in name:
         raise ValueError(
-            f"节点 {node.id} 的变量名 {key!r} 不能包含冒号"
+            f"节点 {node.id} 的变量名 {name!r} 不能包含冒号"
             "（手填或上游送来的都不行）"
         )
-    return cache_key(node, ctx, scope, key)
+    return ctx.variable(scope, name)
 
 
-async def _ensure_list(node: WorkflowNode, ctx: NodeExecutionContext, full_key: str) -> None:
+def _counts_key(key: VariableKey) -> str:
+    """元素出现次数的存储键：本节点私有段 ``{本体}:counts``（段名由本节点自己定）。"""
+    return key.node(COUNTS_SEGMENT)
+
+
+async def _ensure_list(
+    node: WorkflowNode,
+    ctx: NodeExecutionContext,
+    key: VariableKey,
+    *,
+    full: str | None = None,
+) -> None:
     """确认队列键是列表结构：不是 → NodeFailure（业务失败，下游跳过）。
 
     用一次 ``LLEN`` 探测结构（O(1)，不拉数据）：键不存在返回 0；键是别的结构抛
     ``CacheError`` —— 这时再看键在不在，在就说明存了别的结构，不在就是并发被删，按空处理。
+    ``full`` 由写入口注入（不传就用 ``key.full``，读路径用）。
     """
+    full_key = full or key.full
     try:
         await ctx.cache.list_length(full_key)
     except CacheError:
@@ -191,28 +206,29 @@ async def _ensure_list(node: WorkflowNode, ctx: NodeExecutionContext, full_key: 
         # 键已经被删掉：按空列表继续（下面的操作对不存在键天然返回空/0）
 
 
-async def _rebuild_meta(cache: CacheBackend, full_key: str, items: list[str]) -> None:
-    """本体编码后的元素 -> 次数；整体重建成功后不留下旧字段或旧 :idx。"""
-    meta_key = f"{full_key}:meta"
-    await cache.delete(meta_key)
+async def _rebuild_counts(cache: CacheBackend, key: VariableKey, items: list[str]) -> None:
+    """本体里的元素 -> 次数；整体重建，不留旧字段。"""
+    counts_key = _counts_key(key)
+    await cache.delete(counts_key)
     if items:
-        await cache.hash_set(meta_key, {item: str(count) for item, count in Counter(items).items()})
-    await cache.delete(f"{full_key}:idx")
+        await cache.hash_set(counts_key, {item: str(count) for item, count in Counter(items).items()})
 
 
-async def _ensure_meta(cache: CacheBackend, full_key: str) -> None:
-    """写入 / contains 的按需恢复：旧 :idx 或辅助键丢失时从本体重建。"""
+async def _ensure_counts(
+    cache: CacheBackend, key: VariableKey, *, full: str | None = None
+) -> None:
+    """写入 / contains 的按需恢复：计数辅助键丢失（或队列已空）时从本体重建。"""
+    full_key = full or key.full
     if await cache.list_length(full_key) == 0:
-        await cache.delete(f"{full_key}:meta")
-        await cache.delete(f"{full_key}:idx")
-    elif await cache.exists(f"{full_key}:idx") or not await cache.exists(f"{full_key}:meta"):
-        await _rebuild_meta(cache, full_key, await cache.list_range(full_key))
+        await cache.delete(_counts_key(key))
+    elif not await cache.exists(_counts_key(key)):
+        await _rebuild_counts(cache, key, await cache.list_range(full_key))
 
 
-async def _bump_frequency(cache: CacheBackend, full_key: str, item: str, delta: int) -> None:
+async def _bump_frequency(cache: CacheBackend, key: VariableKey, item: str, delta: int) -> None:
     """读改写计数（非原子）；零计数删字段，最后一个字段删掉后 hash 自然消失。"""
-    meta_key = f"{full_key}:meta"
-    current = await cache.hash_get(meta_key, item)
+    counts_key = _counts_key(key)
+    current = await cache.hash_get(counts_key, item)
     n = 0
     if current is not None:
         try:
@@ -221,64 +237,70 @@ async def _bump_frequency(cache: CacheBackend, full_key: str, item: str, delta: 
             n = 0
     n += delta
     if n <= 0:
-        await cache.hash_delete(meta_key, item)
+        await cache.hash_delete(counts_key, item)
     else:
-        await cache.hash_set(meta_key, {item: str(n)})
+        await cache.hash_set(counts_key, {item: str(n)})
 
 
-async def _push(cache: CacheBackend, full_key: str, item: str, *, left: bool = False) -> None:
-    await _ensure_meta(cache, full_key)
+async def _push(
+    cache: CacheBackend, key: VariableKey, item: str, *, left: bool = False, full: str | None = None
+) -> None:
+    full_key = full or key.full
+    await _ensure_counts(cache, key, full=full_key)
     if left:
         await cache.list_push_left(full_key, item)
     else:
         await cache.list_push_right(full_key, item)
-    await _bump_frequency(cache, full_key, item, 1)
+    await _bump_frequency(cache, key, item, 1)
 
 
-async def _pop(cache: CacheBackend, full_key: str, *, left: bool = False) -> list[str]:
-    await _ensure_meta(cache, full_key)
-    popped = await (cache.list_pop_left(full_key) if left else cache.list_pop_right(full_key))
+async def _pop(
+    cache: CacheBackend, key: VariableKey, *, left: bool = False, full: str | None = None
+) -> list[str]:
+    full_key = full or key.full
+    await _ensure_counts(cache, key, full=full_key)
+    popped = await (
+        cache.list_pop_left(full_key) if left else cache.list_pop_right(full_key)
+    )
     if popped:
-        await _bump_frequency(cache, full_key, popped[0], -1)
+        await _bump_frequency(cache, key, popped[0], -1)
     if await cache.list_length(full_key) == 0:
-        await cache.delete(f"{full_key}:meta")
-        await cache.delete(f"{full_key}:idx")
+        await cache.delete(_counts_key(key))
     return popped
 
 
 class DsListViewer(ListViewer):
     """列表节点的查看 / 修改实现；与运行时节点复用同一套频次联动。"""
 
-    # 与通用列表区分：本体之外还有 :meta 记录元素出现次数，能安全整体覆盖
+    # 与通用列表区分：本体之外还有自己那一段 ``:counts`` 记元素出现次数，能安全整体覆盖
+    type_id = "ds-list"
     label = "列表·计数"
     priority = 100
     probe_editable = True
 
     @classmethod
     async def probe(cls, context: VariableContext) -> bool:
-        cache, key = context.cache, context.full_key
-        if await cache.type(key) != "list":
+        cache, key = context.cache, context.variable_key
+        if await cache.type(key.full) != "list":
             return False
-        return (
-            cls.match(context)
-            or await cache.type(f"{key}:meta") == "hash"
-            or await cache.type(f"{key}:idx") == "hash"
-        )
+        return cls.match(context) or await cache.type(_counts_key(key)) == "hash"
 
     def encode(self, value: Any) -> str:
         return _text(text_parameter(value))
 
     async def add(self, /, **params: Any) -> None:
         items = self.items_from(params)
-        cache, key = self.context.cache, self.context.full_key
+        cache, key = self.context.cache, self.context.variable_key
         if "item" in params:
             await _push(cache, key, items[0])
+            await self._sync_index()  # 写变量后登记进所属用户目录，枚举免扫描
             return
         ttl = await self.write_ttl()
-        await cache.delete(key)
+        await cache.delete(key.full)
         if items:
-            await cache.list_push_right(key, *items, ttl=ttl)
-        await _rebuild_meta(cache, key, items)
+            await cache.list_push_right(key.full, *items, ttl=ttl)
+        await _rebuild_counts(cache, key, items)
+        await self._sync_index()  # 写变量后登记进所属用户目录，枚举免扫描
 
 
 # --------------------------------------------------------------------------- 节点注册
@@ -308,11 +330,16 @@ class DsListViewer(ListViewer):
 )
 async def exec_ds_list_append(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """追加队尾：RPUSH 推进，计数 / 索引联动 +1；变量不存在自动建空队列。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
     item = _text(input_value(node, ctx, "item", default=""))
-    await _ensure_list(node, ctx, full_key)
-    await _push(ctx.cache, full_key, item)
+
+    async def _writer(full: str) -> None:
+        await _ensure_list(node, ctx, key, full=full)
+        await _push(ctx.cache, key, item, full=full)
+
+    await ctx.write_variable(key, DsListViewer.type_id, _writer)
     _log(ctx, node, f"append {full_key} <- {_clip(item)}（出现次数+1）")
     return {"obj_out": name}
 
@@ -342,11 +369,16 @@ async def exec_ds_list_append(node: WorkflowNode, ctx: NodeExecutionContext) -> 
 )
 async def exec_ds_list_push_left(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """头插：LPUSH 从头部推进，计数 / 索引联动 +1。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
     item = _text(input_value(node, ctx, "item", default=""))
-    await _ensure_list(node, ctx, full_key)
-    await _push(ctx.cache, full_key, item, left=True)
+
+    async def _writer(full: str) -> None:
+        await _ensure_list(node, ctx, key, full=full)
+        await _push(ctx.cache, key, item, left=True, full=full)
+
+    await ctx.write_variable(key, DsListViewer.type_id, _writer)
     _log(ctx, node, f"push_left {full_key} <- {_clip(item)}（出现次数+1）")
     return {"obj_out": name}
 
@@ -379,7 +411,8 @@ async def exec_ds_list_push_left(node: WorkflowNode, ctx: NodeExecutionContext) 
 )
 async def exec_ds_list_get(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """按下标取：LRANGE 单元素读；越界不算事故，送 ``default``；负数从后往前。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
     raw = str(input_value(node, ctx, "index", default="")).strip()
     if not raw:
@@ -388,7 +421,7 @@ async def exec_ds_list_get(node: WorkflowNode, ctx: NodeExecutionContext) -> dic
         idx = int(raw)
     except ValueError:
         raise ValueError(f"节点 {node.id} 的 index 不是整数：{raw!r}")
-    await _ensure_list(node, ctx, full_key)
+    await _ensure_list(node, ctx, key)
     hits = await ctx.cache.list_range(full_key, idx, idx)  # LRANGE：负数从右数、越界自动裁剪
     if hits:
         value = hits[0]
@@ -435,12 +468,13 @@ async def exec_ds_list_contains(node: WorkflowNode, ctx: NodeExecutionContext) -
     ``trigger`` 出口恒触发（查存在不挡流程主链，可当「无条件继续」用）；
     true / false 二选一照旧剪枝。
     """
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
     item = _text(input_value(node, ctx, "item", default=""))
-    await _ensure_list(node, ctx, full_key)
-    await _ensure_meta(ctx.cache, full_key)
-    found = await ctx.cache.hash_exists(f"{full_key}:meta", item)
+    await _ensure_list(node, ctx, key)
+    await _ensure_counts(ctx.cache, key)
+    found = await ctx.cache.hash_exists(_counts_key(key), item)
     _log(ctx, node, f"contains {full_key}[{_clip(item)}] -> {found}（走索引）")
     return {
         "trigger": True,
@@ -476,10 +510,15 @@ async def exec_ds_list_contains(node: WorkflowNode, ctx: NodeExecutionContext) -
 )
 async def exec_ds_list_pop(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """队尾弹出：RPOP 取走，计数 / 索引联动 -1；弹空不算事故，送 ``default``。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
-    await _ensure_list(node, ctx, full_key)
-    popped = await _pop(ctx.cache, full_key)
+
+    async def _writer(full: str) -> list[str]:
+        await _ensure_list(node, ctx, key, full=full)
+        return await _pop(ctx.cache, key, full=full)
+
+    popped = await ctx.write_variable(key, DsListViewer.type_id, _writer)
     if popped:
         value = popped[0]
         _log(ctx, node, f"pop {full_key} -> 弹出 {_clip(value)}（出现次数-1）")
@@ -515,10 +554,15 @@ async def exec_ds_list_pop(node: WorkflowNode, ctx: NodeExecutionContext) -> dic
 )
 async def exec_ds_list_pop_left(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """队头弹出：LPOP 取走，计数 / 索引联动 -1；弹空不算事故，送 ``default``。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
-    await _ensure_list(node, ctx, full_key)
-    popped = await _pop(ctx.cache, full_key, left=True)
+
+    async def _writer(full: str) -> list[str]:
+        await _ensure_list(node, ctx, key, full=full)
+        return await _pop(ctx.cache, key, left=True, full=full)
+
+    popped = await ctx.write_variable(key, DsListViewer.type_id, _writer)
     if popped:
         value = popped[0]
         _log(ctx, node, f"pop_left {full_key} -> 弹出 {_clip(value)}（出现次数-1）")
@@ -552,9 +596,10 @@ async def exec_ds_list_pop_left(node: WorkflowNode, ctx: NodeExecutionContext) -
 )
 async def exec_ds_list_length(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """长度：LLEN 服务端数，**算 list 本体**、不读计数辅助。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
-    await _ensure_list(node, ctx, full_key)
+    await _ensure_list(node, ctx, key)
     count = await ctx.cache.list_length(full_key)
     _log(ctx, node, f"length {full_key} -> {count}（算 list 长度）")
     return {"obj_out": name, "count": str(count)}

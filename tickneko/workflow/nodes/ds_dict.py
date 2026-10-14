@@ -30,7 +30,7 @@ config:
     ds-dict-keys（取键列表）      入 ``key``                             出 ``obj_out`` / ``list_out``
     ds-dict-length（条目数）      入 ``key``                             出 ``obj_out`` / ``count``
 
-缓存键用前缀区分作用域（同 cache 节点，互不打扰）::
+缓存键用作用域 + 变量名分段（同 cache 节点，变量名即身份）::
 
     workflow   workflow:graph:{图 id}:{变量名}
     account    workflow:acct:{账号 id}:{变量名}
@@ -67,6 +67,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from tickneko.core.cache.models import CacheError
+from tickneko.variables import DictViewer, VariableKey, text_parameter
+
 from ..models import ValidationIssue, WorkflowNode
 from .base import (
     TRIGGER_PORT,
@@ -74,13 +77,9 @@ from .base import (
     NodeExecutionContext,
     NodeFailure,
     PortSpec,
-    cache_key,
     input_value,
 )
-from tickneko.core.cache.models import CacheError
 from .registry import register_node
-from .variable_viewer import text_parameter
-from .variable_viewers import DictViewer
 
 #: 允许的作用域，**顺序即画布下拉顺序**
 DS_DICT_SCOPE_ORDER: tuple[str, ...] = ("workflow", "account")
@@ -116,6 +115,7 @@ def validate_ds_dict_node(node: WorkflowNode) -> list[ValidationIssue]:
             )
         )
 
+
     return issues
 
 
@@ -146,31 +146,37 @@ def _required_field(node: WorkflowNode, ctx: NodeExecutionContext) -> str:
     return field
 
 
-def _prepare(node: WorkflowNode, ctx: NodeExecutionContext) -> str:
-    """解析并校验 scope / key，返回完整缓存键；配置错误当场抛。"""
+def _prepare(node: WorkflowNode, ctx: NodeExecutionContext) -> VariableKey:
+    """解析并校验 scope / key，返回变量的身份（键由变量中枢拼）；配置错误当场抛。"""
     scope = str(node.config.get("scope", "")).strip() or "workflow"
     if scope not in DS_DICT_SCOPE_ORDER:
         raise ValueError(f"节点 {node.id} 的作用域不合法：{scope!r}")
 
-    key = _var_name(node, ctx)
-    if not key:
+    name = _var_name(node, ctx)
+    if not name:
         raise ValueError(f"节点 {node.id} 的 key 为空（入口没接线，config 里也没填）")
-    if ":" in key:
+    if ":" in name:
         raise ValueError(
-            f"节点 {node.id} 的变量名 {key!r} 不能包含冒号"
+            f"节点 {node.id} 的变量名 {name!r} 不能包含冒号"
             "（手填或上游送来的都不行）"
         )
-    return cache_key(node, ctx, scope, key)
+    return ctx.variable(scope, name)
 
 
 async def _ensure_hash(
-    node: WorkflowNode, ctx: NodeExecutionContext, full_key: str
+    node: WorkflowNode,
+    ctx: NodeExecutionContext,
+    key: VariableKey,
+    *,
+    full: str | None = None,
 ) -> None:
     """确认缓存键是哈希结构：不是 → NodeFailure（业务失败，下游跳过）；不存在/字段无关紧要。
 
     用一次 ``HEXISTS`` 探测结构（O(1)，不拉数据）：键不存在返回 False，键是别的结构抛
     ``CacheError`` —— 这时再看键在不在，在就说明存了别的结构，不在就是并发被删，按空处理。
+    ``full`` 由写入口注入（不传就用 ``key.full``，读路径用）。
     """
+    full_key = full or key.full
     try:
         await ctx.cache.hash_exists(full_key, "*")
     except CacheError:
@@ -185,6 +191,7 @@ async def _ensure_hash(
 class DsDictViewer(DictViewer):
     """字典节点拥有文本编码；完整 fields 保存删除未提交的旧字段。"""
 
+    type_id = "ds-dict"
     label = "键值对"
     priority = 100
 
@@ -220,12 +227,17 @@ class DsDictViewer(DictViewer):
 )
 async def exec_ds_dict_set(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """设值：写 ``field=value``（HSET 增量写，不碰其他字段）；变量不存在自动建空字典。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
     field = _required_field(node, ctx)
     value = _text(input_value(node, ctx, "value", default=""))
-    await _ensure_hash(node, ctx, full_key)
-    added = await ctx.cache.hash_set(full_key, {field: value})
+
+    async def _writer(full: str) -> bool:
+        await _ensure_hash(node, ctx, key, full=full)
+        return await ctx.cache.hash_set(full, {field: value})
+
+    added = await ctx.write_variable(key, DsDictViewer.type_id, _writer)
     _log(ctx, node, f"set {full_key}[{field}] = {_clip(value)}{'（隐式建字典）' if added else ''}")
     return {"obj_out": name}
 
@@ -258,10 +270,11 @@ async def exec_ds_dict_set(node: WorkflowNode, ctx: NodeExecutionContext) -> dic
 )
 async def exec_ds_dict_get(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """取值：HGET 单字段读（不整表拉取）；键不存在**不算事故**，送 ``default``。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
     field = _required_field(node, ctx)
-    await _ensure_hash(node, ctx, full_key)
+    await _ensure_hash(node, ctx, key)
     value = await ctx.cache.hash_get(full_key, field)
     if value is None:
         # 键不存在不算事故：有默认值就用默认值（手填兜底 / 也能接线），没有才送空串
@@ -309,10 +322,11 @@ async def exec_ds_dict_contains(node: WorkflowNode, ctx: NodeExecutionContext) -
     ``trigger`` 出口恒触发（查存在不挡流程主链，可当「无条件继续」用）；
     true / false 二选一照旧剪枝。
     """
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
     field = _required_field(node, ctx)
-    await _ensure_hash(node, ctx, full_key)
+    await _ensure_hash(node, ctx, key)
     found = await ctx.cache.hash_exists(full_key, field)
     _log(ctx, node, f"contains {full_key}[{field}] -> {found}")
     return {
@@ -348,11 +362,16 @@ async def exec_ds_dict_contains(node: WorkflowNode, ctx: NodeExecutionContext) -
 )
 async def exec_ds_dict_remove(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """删除键：HDEL 单字段删（不整表重写）；不存在的键不报错（日志注明）。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
     field = _required_field(node, ctx)
-    await _ensure_hash(node, ctx, full_key)
-    removed = await ctx.cache.hash_delete(full_key, field)
+
+    async def _writer(full: str) -> bool:
+        await _ensure_hash(node, ctx, key, full=full)
+        return await ctx.cache.hash_delete(full, field)
+
+    removed = await ctx.write_variable(key, DsDictViewer.type_id, _writer)
     _log(ctx, node, f"remove {full_key}[{field}] -> {'删了' if removed else '本来就没有'}")
     return {"obj_out": name}
 
@@ -381,9 +400,10 @@ async def exec_ds_dict_remove(node: WorkflowNode, ctx: NodeExecutionContext) -> 
 )
 async def exec_ds_dict_keys(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """取键列表：HKEYS 只列字段名（不搬值），沿 list 端口原样送出。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
-    await _ensure_hash(node, ctx, full_key)
+    await _ensure_hash(node, ctx, key)
     keys = await ctx.cache.hash_keys(full_key)
     _log(ctx, node, f"keys {full_key} -> {len(keys)} 个")
     return {"obj_out": name, "list_out": keys}
@@ -413,9 +433,10 @@ async def exec_ds_dict_keys(node: WorkflowNode, ctx: NodeExecutionContext) -> di
 )
 async def exec_ds_dict_length(node: WorkflowNode, ctx: NodeExecutionContext) -> dict[str, Any]:
     """条目数：HLEN 服务端数（O(1)，不拉数据），文本化送出。"""
-    full_key = _prepare(node, ctx)
+    key = _prepare(node, ctx)
+    full_key = key.full
     name = _var_name(node, ctx)
-    await _ensure_hash(node, ctx, full_key)
+    await _ensure_hash(node, ctx, key)
     count = await ctx.cache.hash_length(full_key)
     _log(ctx, node, f"length {full_key} -> {count}")
     return {"obj_out": name, "count": str(count)}
