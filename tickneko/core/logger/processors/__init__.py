@@ -5,7 +5,8 @@
 * :class:`ConsoleLogProcessor`：控制台（最小化启动的默认出口）；
 * :class:`LocalFileLogProcessor`：本地文件（JSON Lines，**按天分片**、片内按时间 / 大小换片）；
 * :class:`DatabaseLogProcessor`：数据库（依赖
-  :class:`~tickneko.core.logger.interfaces.LogStore` 协议，落地实现在 ``tickneko.db``）。
+  :class:`~tickneko.core.logger.interfaces.LogStore` 协议，落地实现在
+  :class:`~tickneko.core.logger.store.SqlLogStore`）。
 
 自定义处理机只需继承 :class:`BaseLogProcessor` 并实现 ``write`` 与 ``search``；
 处理机**不做路由也不做过滤**——路由由命名层级节点在**创建时固化的一份配置副本**

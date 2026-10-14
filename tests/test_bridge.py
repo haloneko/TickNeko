@@ -317,6 +317,85 @@ async def test_gateway_publish_without_subscribers_is_quiet() -> None:
     await gateway.publish(PlatformEvent(platform="onebot", owner_id="u-admin"))
 
 
+class _RecordingLogger:
+    """鸭子类型的日志实例：只记 info 的参数，供断言「收到事件」审计日志的字段。"""
+
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str, dict[str, object]]] = []
+
+    def info(
+        self, message: object, *, owner_id: str = "", **extra: object
+    ) -> bool:
+        self.records.append((str(message), owner_id, dict(extra)))
+        return True
+
+    def debug(self, *args: object, **kwargs: object) -> bool:
+        return True
+
+
+async def test_gateway_publish_writes_event_audit_log() -> None:
+    """收到事件：先落一条审计日志，平台 / 事件类型 / 群私聊 / 引起者都在结构化字段里。
+
+    ``owner_id`` 走日志一等字段（按归属筛得到），其余 ``event_*`` 进 extra（日志页
+    直接渲染，不用展开 JSON）。
+    """
+    logger = _RecordingLogger()
+    gateway = Gateway(logger=logger)
+    await gateway.publish(
+        PlatformEvent(
+            platform="onebot",
+            owner_id="u-admin",
+            self_id="10001",
+            kind="message",
+            event_type="",
+            chat="group",
+            chat_id="70001",
+            user_id="20002",
+            text="你好",
+            message_id="123",
+            time=1_700_000_000.0,
+        )
+    )
+    assert len(logger.records) == 1
+    message, owner_id, extra = logger.records[0]
+    assert message == "收到消息"
+    assert owner_id == "u-admin"
+    assert extra["event_platform"] == "onebot"
+    assert extra["event_self_id"] == "10001"
+    assert extra["event_kind"] == "message"
+    assert extra["event_type"] == ""
+    assert extra["event_chat"] == "group"
+    assert extra["event_chat_id"] == "70001"
+    assert extra["event_user_id"] == "20002"
+    assert extra["event_text"] == "你好"
+    assert extra["event_message_id"] == "123"
+    assert extra["event_time"] == 1_700_000_000.0
+
+
+async def test_gateway_publish_audit_log_keeps_owner_private() -> None:
+    """审计日志按事件归属记：通知类事件（无会话指向）也要有 owner / kind / event_type。"""
+    logger = _RecordingLogger()
+    gateway = Gateway(logger=logger)
+    await gateway.publish(
+        PlatformEvent(
+            platform="onebot",
+            owner_id="u-admin",
+            kind="notice",
+            event_type="friend_recall",
+            chat="other",
+            user_id="20002",
+            message_id="456",
+        )
+    )
+    message, owner_id, extra = logger.records[0]
+    assert message == "收到事件"
+    assert owner_id == "u-admin"
+    assert extra["event_kind"] == "notice"
+    assert extra["event_type"] == "friend_recall"
+    assert extra["event_chat"] == "other"
+    assert extra["event_user_id"] == "20002"
+
+
 async def test_gateway_adapter_lookup() -> None:
     """按平台取适配器：注册了拿得到，没注册是 None。"""
     gateway = Gateway()

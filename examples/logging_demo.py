@@ -38,9 +38,9 @@ from tickneko.core.logger import (  # noqa: E402
     LogCore,
     LogRecord,
     LogSearchResult,
+    SqlLogStore,
     Target,
 )
-from tickneko.db import SqlLogStore  # noqa: E402
 
 
 class BrokenLogProcessor(BaseLogProcessor):

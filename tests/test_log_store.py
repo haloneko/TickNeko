@@ -1,4 +1,4 @@
-"""日志落库：:class:`~tickneko.db.SqlLogStore`（``logs`` 表）与数据库处理机的接线。
+"""日志落库：:class:`~tickneko.core.logger.store.SqlLogStore`（``logs`` 表）与数据库处理机的接线。
 
 处理机自己不拼 SQL——建表、写入、检索都归 store 管，所以这里两头都测：store 的
 写入 / 检索 / 清理，以及处理机确实把缓冲里的日志交给了 store、并把检索原样转出去。
@@ -16,8 +16,13 @@ pytest.importorskip("aiosqlite", reason="sqlite 的异步驱动：pip install \"
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine  # noqa: E402
 from sqlmodel.ext.asyncio.session import AsyncSession  # noqa: E402
 
-from tickneko.core.logger import DatabaseLogProcessor, LogLevel, LogRecord  # noqa: E402
-from tickneko.db import LogTable, SqlLogStore  # noqa: E402
+from tickneko.core.logger import (  # noqa: E402
+    DatabaseLogProcessor,
+    LogLevel,
+    LogRecord,
+    LogTable,
+    SqlLogStore,
+)
 
 #: 本文件用到的内存引擎：每个用例一份，用例结束由下面的 fixture 统一 dispose
 _MEMORY_ENGINES: list[AsyncEngine] = []
@@ -200,6 +205,29 @@ async def test_delete_before_removes_only_older() -> None:
     assert await store.delete_before(base - 50) == 0  # 已经清干净了
     with pytest.raises(ValueError):
         await store.delete_before(None)  # 没有明确时刻就是非法输入
+
+
+async def test_delete_before_can_filter_by_owner() -> None:
+    """按归属过滤：给 ``owner_id`` 只删那个归属名下的（公共日志不动）。"""
+    store = await memory_store()
+    base = time.time()
+    await store.add(
+        [
+            record("管理员的旧日志", owner_id="u-admin", moment=base - 100),
+            record("机器人的旧日志", owner_id="u-robot", moment=base - 100),
+            record("框架的旧日志", moment=base - 100),  # 公共
+            record("机器人的新日志", owner_id="u-robot", moment=base),  # 三天内不清
+        ]
+    )
+
+    assert await store.delete_before(base - 50, owner_id="u-robot") == 1
+    remaining = {r.message for r in (await store.search()).records}
+    assert remaining == {"管理员的旧日志", "框架的旧日志", "机器人的新日志"}
+
+    # 空串 = 只删公共日志
+    assert await store.delete_before(base - 50, owner_id="") == 1
+    remaining = {r.message for r in (await store.search()).records}
+    assert remaining == {"管理员的旧日志", "机器人的新日志"}
 
 
 async def test_broken_extra_does_not_break_search() -> None:

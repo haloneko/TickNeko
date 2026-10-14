@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -63,10 +64,10 @@ from tickneko.core.logger import (  # noqa: E402
     LogCore,
     LogRecord,
     LogSearchResult,
+    SqlLogStore,
     configure,
     manager,
 )
-from tickneko.db import SqlLogStore  # noqa: E402
 from tickneko.wiring import wire_loggers  # noqa: E402
 
 #: 演示账号（见 tickneko.api.services.user.demo.DEMO_USERS）
@@ -1215,6 +1216,132 @@ class TestLogSearch:
         assert bad_time.json()["error"]["code"] == ErrorCode.VALIDATION_ERROR
         assert bad_limit.status_code == 422  # 上限 / 下限由 Annotated 里的 Query 管
         assert bad_limit.json()["error"]["code"] == ErrorCode.VALIDATION_ERROR
+
+
+# --------------------------------------------------------------------------- 清理
+async def _seed_old_logs(core: LogCore) -> SqlLogStore:
+    """给核心挂上库出口，并**直接往 store 塞**「三天前」的旧日志与「三天内」的新日志。
+
+    旧日志绕开处理器（处理器批量异步写、时间戳不好控），直接 ``store.add`` 落库，
+    时间戳按需指定；返回 store 供断言「确实删掉了」。
+    """
+    engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    _MEMORY_ENGINES.append(engine)
+    store = SqlLogStore(engine)
+    await store.ensure_schema()
+    core.mount(DatabaseLogProcessor(store, buffer_size=5, flush_interval=0))
+    base = time.time()
+    await store.add(
+        [
+            LogRecord(message="管理员的旧日志", logger_name=API_LOGGER_NAME, owner_id="u-admin", timestamp=base - 4 * 86400),
+            LogRecord(message="管理员的旧日志二", logger_name=API_LOGGER_NAME, owner_id="u-admin", timestamp=base - 4 * 86400),
+            LogRecord(message="机器人的旧日志", logger_name=API_LOGGER_NAME, owner_id="u-robot", timestamp=base - 4 * 86400),
+            LogRecord(message="公共的旧日志", logger_name=API_LOGGER_NAME, timestamp=base - 4 * 86400),
+            LogRecord(message="三天内的新日志", logger_name=API_LOGGER_NAME, owner_id="u-robot", timestamp=base - 3600),
+        ]
+    )
+    return store
+
+
+class TestLogClear:
+    """清理历史日志：范围（自己的 / 别人的 / 全部）、时间线（三天内不可清）、只清库。"""
+
+    async def test_clear_requires_login(self) -> None:
+        """没登录就清理：401 —— 破坏性操作更得先认人。"""
+        async with client_for(app_with()) as client:
+            response = await client.post("/api/logs/clear", json={})
+        assert response.status_code == 401
+
+    async def test_clear_robot_cleans_only_own_old(self, core: LogCore) -> None:
+        """普通用户不带 owner_id：只清自己三天前的，别人的 / 公共的 / 三天内的都不动。"""
+        await _seed_old_logs(core)
+        async with client_for(app_with()) as client:
+            robot = {"Authorization": f"Bearer {await token_of(client, ROBOT)}"}
+            response = await client.post("/api/logs/clear", headers=robot, json={})
+
+            assert response.status_code == 200
+            assert response.json()["data"]["deleted"] == 1
+
+            # 自己名下的：旧日志清掉了，三天内的新日志（加登录那几条）还在
+            robot_rows = await search_logs(client, robot, owner_id="u-robot")
+            robot_messages = [row.message for row in robot_rows]
+            assert "机器人的旧日志" not in robot_messages
+            assert "三天内的新日志" in robot_messages
+
+            # 别人的（含公共）一条没动
+            admin = {"Authorization": f"Bearer {await token_of(client, ADMIN)}"}
+            messages = [row.message for row in await search_logs(client, admin)]
+            assert "管理员的旧日志" in messages
+            assert "管理员的旧日志二" in messages
+            assert "公共的旧日志" in messages
+            assert "机器人的旧日志" not in messages
+            assert "三天内的新日志" in messages
+
+    async def test_clear_robot_cannot_target_admin(self, core: LogCore) -> None:
+        """普通用户显式指定别人的归属 -> 403。"""
+        await _seed_old_logs(core)
+        async with client_for(app_with()) as client:
+            robot = {"Authorization": f"Bearer {await token_of(client, ROBOT)}"}
+            forbidden = await client.post(
+                "/api/logs/clear", headers=robot, json={"owner_id": "u-admin"}
+            )
+        assert forbidden.status_code == 403
+
+    async def test_clear_admin_can_clear_all(self, core: LogCore) -> None:
+        """管理员不传 owner_id = 清全部（含公共）三天前的，三天内的留下。"""
+        await _seed_old_logs(core)
+        async with client_for(app_with()) as client:
+            admin = {"Authorization": f"Bearer {await token_of(client, ADMIN)}"}
+            response = await client.post("/api/logs/clear", headers=admin, json={})
+
+            assert response.status_code == 200
+            assert response.json()["data"]["deleted"] == 4
+            messages = [row.message for row in await search_logs(client, admin)]
+            assert "三天内的新日志" in messages
+            assert "管理员的旧日志" not in messages
+            assert "公共的旧日志" not in messages
+
+    async def test_clear_admin_can_target_one_owner(self, core: LogCore) -> None:
+        """管理员也可以只清某个人名下的：不碰别人、不碰公共。"""
+        await _seed_old_logs(core)
+        async with client_for(app_with()) as client:
+            admin = {"Authorization": f"Bearer {await token_of(client, ADMIN)}"}
+            response = await client.post(
+                "/api/logs/clear", headers=admin, json={"owner_id": "u-admin"}
+            )
+
+            assert response.status_code == 200
+            assert response.json()["data"]["deleted"] == 2
+            messages = [row.message for row in await search_logs(client, admin)]
+            assert "机器人的旧日志" in messages
+            assert "公共的旧日志" in messages
+            assert "管理员的旧日志" not in messages
+
+    async def test_clear_rejects_recent_or_bad_cutoff(self, core: LogCore) -> None:
+        """三天内的日志清不掉：before 晚于三天前 -> 422；格式不对 -> 422。"""
+        await _seed_old_logs(core)
+        now = time.time()
+        async with client_for(app_with()) as client:
+            admin = {"Authorization": f"Bearer {await token_of(client, ADMIN)}"}
+            recent = await client.post(
+                "/api/logs/clear", headers=admin, json={"before": str(int(now - 3600))}
+            )
+            bad = await client.post(
+                "/api/logs/clear", headers=admin, json={"before": "不是时间"}
+            )
+
+        assert recent.status_code == 422
+        assert "三天前" in recent.json()["error"]["message"]
+        assert bad.status_code == 422
+
+    async def test_clear_without_database_outlet_is_503(self, core: LogCore) -> None:
+        """库出口没开：503 说清楚，而不是静默「删了 0 条」糊弄过去。"""
+        assert core.get_processor(DatabaseLogProcessor.name) is None
+        async with client_for(app_with()) as client:
+            admin = {"Authorization": f"Bearer {await token_of(client, ADMIN)}"}
+            response = await client.post("/api/logs/clear", headers=admin, json={})
+        assert response.status_code == 503
+        assert "落库" in response.json()["error"]["message"]
 
 
 # --------------------------------------------------------------------------- 协议

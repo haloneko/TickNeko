@@ -1,8 +1,8 @@
 """日志系统对外依赖的抽象协议。
 
-日志系统不直接依赖具体数据库实现，只依赖这里的协议：数据库层（``tickneko.db``）给出一个
-符合协议的对象（如 :class:`~tickneko.db.SqlLogStore`），就能当数据库日志处理机的后端，
-从而保证「日志层」与「数据库层」解耦。
+日志系统不直接依赖具体数据库实现，只依赖这里的协议：给一个符合协议的对象（如
+:class:`~tickneko.core.logger.store.SqlLogStore`），就能当数据库日志处理机的后端，
+从而保证「日志层」与「具体存储」解耦。
 
 :class:`LogStore` 约定的都是「基本能力」，没有可选 / 额外能力之分，实现必须全部给出：
 
@@ -27,7 +27,7 @@ from .models import LogLevel, LogSearchResult, TimestampLike
 
 @runtime_checkable
 class LogStore(Protocol):
-    """日志存储协议（由数据库层实现）。
+    """日志存储协议（由 :mod:`tickneko.core.logger.store` 里的后端实现）。
 
     方法均为基本能力，实现需要全部给出。
     """
@@ -66,7 +66,9 @@ class LogStore(Protocol):
         """
         ...
 
-    async def delete_before(self, before: TimestampLike) -> int:
+    async def delete_before(
+        self, before: TimestampLike, owner_id: str | None = None
+    ) -> int:
         """清理历史日志：删除 ``before`` 时刻之前的记录，返回删除行数。
 
         约定：``before`` 是宽松输入（时间戳 / ISO 字符串 /
@@ -78,5 +80,7 @@ class LogStore(Protocol):
 
         :param before: 删除该时刻之前的日志；``None`` 属于非法输入，
             应抛 :class:`ValueError`。
+        :param owner_id: 只删这个归属名下的日志；``None`` 不过滤（删所有归属，
+            含公共），空串 = 只删公共日志（框架自身、没有归属的那部分）。
         """
         ...

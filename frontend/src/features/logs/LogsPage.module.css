@@ -54,6 +54,24 @@
   border-color: var(--accent-border);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+/* 清理范围下拉：只管理员露，样式跟工具栏同高 */
+.clearScope {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+}
+.clearScope:focus-visible {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.clearBtn {
+  white-space: nowrap;
+}
 
 /* ---------- 筛选栏 ---------- */
 .filterCard {

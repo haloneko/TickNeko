@@ -8,21 +8,26 @@
  *   普通用户后端强制只返回自己名下的，UI 上直接不露出这两个条件；
  * - 响应带 total，底部走通用分页条（`common/Pagination`）：页码 + 首尾 / 上下页 + 跳页，
  *   每页条数 20/50/100/200；筛选条件 / 每页条数一变就回到第 1 页，数据变少时页码自动收口；
- * - 可选 10 秒自动刷新：静默重拉当前页（新日志本来就出现在最前），不闪骨架屏。
+ * - 可选 10 秒自动刷新：静默重拉当前页（新日志本来就出现在最前），不闪骨架屏；
+ * - 「清理历史日志」（POST /api/logs/clear）：只清**落库**的、**三天前**的（三天内后端
+ *   一律拦下），走确认弹窗；普通用户只能清自己名下的，管理员可切「仅我名下的 / 全部日志」。
  *
  * 分页 / 防旧响应覆盖 / 错误归一 / 页码越界收口都在 `common/usePagedQuery`，这里只管
- * 筛选字段（草稿 vs 已生效）、展开态、自动刷新，以及行怎么渲染。
+ * 筛选字段（草稿 vs 已生效）、展开态、自动刷新、清理范围，以及行怎么渲染。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { searchLogs, LOG_LEVELS, type LogEntry } from './logsApi'
+import { searchLogs, clearLogs, LOG_LEVELS, type LogEntry } from './logsApi'
 import { fetchOwners, type Owner } from '../../lib/ownersApi'
 import { useAuth } from '../auth/authStore'
 import OwnerFilter, { ownerName } from '../../common/OwnerFilter'
-import { IconRefresh, IconChevronDown, IconAlert, IconClock } from '../../common/icons'
+import { IconRefresh, IconChevronDown, IconAlert, IconClock, IconTrash } from '../../common/icons'
 import { ListSkeleton } from '../../common/Skeleton'
 import ErrorBox from '../../common/ErrorBox'
 import { usePagedQuery } from '../../common/usePagedQuery'
 import Pagination from '../../common/Pagination'
+import { ConfirmDialog } from '../../common/ConfirmDialog'
+import { useToast } from '../../common/Toast'
+import { ApiRequestError } from '../../lib/http'
 import styles from './LogsPage.module.css'
 
 /** 每页条数可选项；后端单次上限 500，这里给几档常用值。 */
@@ -89,6 +94,12 @@ export default function LogsPage() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   /** 可选归属：归属下拉直接列人（管理员才用得上；拉不到就只剩「全部 / 仅公共」） */
   const [owners, setOwners] = useState<Owner[]>([])
+  /** 清理范围（仅管理员可选）：own = 只清自己名下的；all = 全部（含公共） */
+  const [clearScope, setClearScope] = useState<'own' | 'all'>('own')
+  /** 待确认的清理目标：非 null 时弹确认框（破坏性操作先过一道确认） */
+  const [clearTarget, setClearTarget] = useState<'own' | 'all' | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const { pushToast } = useToast()
 
   const patchDraft = (patch: Partial<Filters>) =>
     setDraft((prev) => ({ ...prev, ...patch }))
@@ -184,6 +195,26 @@ export default function LogsPage() {
       .catch(() => undefined)
   }, [isAdmin])
 
+  /** 执行清理：只清落库的、三天前的；范围按角色定（普通用户后端强制只清自己的）。 */
+  async function runClear() {
+    if (!clearTarget) return
+    setClearing(true)
+    try {
+      const params: { owner_id?: string } = {}
+      // 管理员选「仅我名下的」就显式带自己的归属；其余（普通用户 / 管理员选全部）不传，
+      // 后端按角色决定（普通用户强制自己，管理员清全部含公共）
+      if (clearTarget === 'own' && isAdmin) params.owner_id = state.user?.id ?? ''
+      const result = await clearLogs(params)
+      pushToast('success', `已清理 ${result.data.deleted} 条三天前的日志`)
+      setClearTarget(null)
+      query.refresh(true)
+    } catch (err) {
+      pushToast('error', err instanceof ApiRequestError ? err.message : '清理失败')
+    } finally {
+      setClearing(false)
+    }
+  }
+
   return (
     <div className={styles.page}>
       <header className={styles.head}>
@@ -192,8 +223,8 @@ export default function LogsPage() {
           <p className={styles.sub}>
             检索框架落库的运行日志，按写入顺序倒序（最新的在最前）。
             {isAdmin
-              ? '你是管理员，可以查看所有人的日志并切换来源。'
-              : '普通账号只显示自己名下的日志。'}
+              ? '你是管理员，可以查看所有人的日志、切换来源，并清理三天前的历史日志。'
+              : '普通账号只显示自己名下的日志，可清理自己三天前的历史日志。'}
           </p>
         </div>
         <div className={styles.headActions}>
@@ -215,8 +246,49 @@ export default function LogsPage() {
             <IconRefresh size={15} className={query.loading ? styles.spin : undefined} />
             刷新
           </button>
+          {isAdmin && (
+            <select
+              className={styles.clearScope}
+              value={clearScope}
+              onChange={(e) => setClearScope(e.target.value as 'own' | 'all')}
+              aria-label="清理范围"
+            >
+              <option value="own">仅我名下的</option>
+              <option value="all">全部日志</option>
+            </select>
+          )}
+          <button
+            type="button"
+            className={`btn btn-danger ${styles.clearBtn}`}
+            onClick={() => setClearTarget(clearScope)}
+            disabled={clearing}
+            title="只清理落库的、三天前的日志（三天内的删不掉）"
+          >
+            <IconTrash size={15} />
+            {isAdmin ? '清理三天前' : '清理我的三天前'}
+          </button>
         </div>
       </header>
+
+      {/* 清理确认：破坏性操作先过一道（只清落库、只清三天前，文案写清楚再让动手） */}
+      {clearTarget && (
+        <ConfirmDialog
+          title={
+            clearTarget === 'all' ? '清理全部三天前的日志？' : '清理三天前的日志？'
+          }
+          body={
+            <>
+              只清理<strong>落库</strong>的、<strong>三天前</strong>的日志
+              {clearTarget === 'all' ? '（含所有账号名下与公共的）' : '（你名下的）'}
+              ；三天内的不会动，清理不可恢复。
+            </>
+          }
+          confirmText="清理"
+          busy={clearing}
+          onCancel={() => setClearTarget(null)}
+          onConfirm={() => void runClear()}
+        />
+      )}
 
       {/* 筛选栏 */}
       <form className={`card ${styles.filterCard}`} onSubmit={submitSearch}>

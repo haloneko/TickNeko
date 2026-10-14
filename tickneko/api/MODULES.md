@@ -244,8 +244,8 @@ api/*  ──►  services/*  ──►  (services/auth ──► services/user)
 
 > 把「查历史日志」做成一个 HTTP 接口。**查询本身不在这里实现**：条件原样递给日志系统的
 > `BaseLogger.search()`，它再扇出到各出口 —— 落库那份就是一条 SQL（`WHERE` / `ORDER BY` /
-> `LIMIT` 全在数据库那边做完，不是捞回来再筛）。出口怎么接、日志怎么落，见 `tickneko.db` 与
-> `tickneko.core.logger`。
+> `LIMIT` 全在数据库那边做完，不是捞回来再筛）。出口怎么接、日志怎么落，见
+> `tickneko.core.logger`（落库后端在 `tickneko.core.logger.store`）。
 
 > **登录了还要看范围**：日志里有别人的东西，所以带 `admin` 角色的人**不限**，其余人**只看得见
 > 自己名下**的（按记录里的 `owner_id` 过滤，即 `user.user.id`）；显式写别人的归属 → **403**

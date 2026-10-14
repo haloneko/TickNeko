@@ -36,8 +36,11 @@ from .models import LogLevel, LogRecord, LogSearchResult, Target, normalize_time
 from .core import current_default_core, default_core, set_default_core
 from .manager import LogManager
 
-# ---- 依赖协议（第三方存储实现用）----
+# ---- 依赖协议（存储实现按它对接）----
 from .interfaces import LogStore
+
+# ---- 存储后端（LogStore 协议的具体实现；命名同 workflow/store.py 的落库惯例）----
+from .store import LogTable, SqlLogStore
 
 __all__ = [
     # 进程门面（业务代码常用）
@@ -68,4 +71,7 @@ __all__ = [
     "LogManager",
     # 依赖协议
     "LogStore",
+    # 存储后端
+    "LogTable",
+    "SqlLogStore",
 ]

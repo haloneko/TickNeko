@@ -118,7 +118,7 @@ class LogRecord:
     #: 空串 = **公共所有者**：没有明确归属的日志（启动、框架自身、握手被拒、定时任务……）。
     owner_id: str = ""
     #: 落库那份的**自增序号**（插入顺序，由数据库分配，见
-    #: :class:`~tickneko.db.LogTable`）：检索按它倒序。
+    #: :class:`~tickneko.core.logger.store.LogTable`）：检索按它倒序。
     #:
     #: 为什么不能只靠时间戳：同一次调用里写下的几条（甚至一整批）时间戳常常一模一样 ——
     #: 秒级浮点的分辨率不够，Windows 上 ``time.time()`` 的粒度更粗（约 15ms）。那时谁先谁后

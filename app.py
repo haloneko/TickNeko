@@ -43,9 +43,9 @@ from tickneko.core.logger import (
     LocalFileLogProcessor,
     LogCore,
     LogLevel,
+    SqlLogStore,
     configure,
 )
-from tickneko.db import SqlLogStore
 
 # --------------------------------------------------------------------------- 初始化
 #: 日志出口单独连另一个库时自建的引擎（默认没有，用的就是业务那个）；停机时一并收

@@ -37,6 +37,7 @@ OneBot ``onebot.file``，「本机文件」= 这几路一起查）；要精确�
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from typing import Annotated
 
@@ -58,12 +59,16 @@ from ...common.models import ApiResponse, ErrorResponse
 from ..auth.dependencies import CurrentUserDep
 from ..onebot.dependencies import ensure_can_touch, is_admin
 from .dependencies import LoggerDep
-from .responses import LogData, LogPage
+from .requests import ClearLogsRequest
+from .responses import ClearLogsData, LogData, LogPage
 
 router = APIRouter(prefix="/logs", tags=["运行日志"])
 
 #: 一次最多给多少条：再多请用 ``offset`` 翻页，别把整库日志一次拉出来
 MAX_LIMIT: int = 500
+
+#: 清理时间线：三天内的日志**不**在可清理范围（误删刚发生的事比留着更难查）
+RETENTION_SECONDS: float = 3 * 24 * 3600
 
 #: 不指定出口时查哪个：只查**落库那份**（SQL）。查历史以它为准——控制台不留存日志，
 #: 文件那份是给人在本机翻的。名字取自处理机类的类属性，哪天改名这里跟着变。
@@ -320,4 +325,76 @@ async def search_logs(
     data: list[LogData] = [_log_of(record) for record in result.records if _is_log(record)]
     return ApiResponse[LogPage](
         data=LogPage(items=data, total=result.total), trace_id=trace_id
+    )
+
+
+@router.post(
+    "/clear",
+    response_model=ApiResponse[ClearLogsData],
+    summary="清理历史日志",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+            "description": "没登录 / 令牌无效",
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "普通用户试图清别人的归属名下的日志",
+        },
+        HttpStatus.UNPROCESSABLE_ENTITY: {
+            "model": ErrorResponse,
+            "description": "before 时间格式不对，或晚于三天前（三天内的日志清不掉）",
+        },
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "model": ErrorResponse,
+            "description": "日志落库出口没开（清理只针对数据库那份）",
+        },
+    },
+)
+async def clear_logs(
+    request: Request,
+    body: ClearLogsRequest,
+    user: CurrentUserDep,  # 先鉴权：没登录就 401，清理是破坏性操作，更得先认人
+    logger: LoggerDep,
+) -> ApiResponse[ClearLogsData]:
+    """清理落库的历史日志：**只清数据库那份、只清三天前的**。
+
+    范围（``owner_id``）与检索同一个口径：普通用户**强制只清自己名下**的（显式写别人的
+    归属 -> 403），管理员不传就是**清全部**（含公共日志），也可以指定只清某个人名下的。
+
+    时间线（``before``）：不传 = 默认三天前（只删三天前的历史）；传了也**不得晚于**三天前
+    （``RETENTION_SECONDS``），三天内的日志一条都删不掉 —— 清理线在这里先拦住，不给误删
+    刚发生的事留口子。删完返回实际删了几条与生效的清理线，前端好给反馈。
+    """
+    trace_id: str = trace_id_of(request)
+    cutoff = time.time() - RETENTION_SECONDS
+
+    # 时间线：校验格式 + 不得晚于三天前（三天内的日志不可清）
+    if body.before:
+        _check_moment(body.before, "before")
+        before_ts = normalize_timestamp(body.before)
+        if before_ts is None or before_ts > cutoff:
+            raise ApiError(
+                ErrorCode.VALIDATION_ERROR,
+                f"只能清理三天前的日志：before 不晚于 {int(cutoff)}（Unix 秒）",
+                status_code=HttpStatus.UNPROCESSABLE_ENTITY,
+            )
+        chosen_before = str(before_ts)
+    else:
+        chosen_before = str(int(cutoff))
+
+    # 范围：普通用户强制自己的，管理员可全部（None）或指定某个人
+    if body.owner_id is None:
+        owner: str | None = user.user.id if not is_admin(user) else None
+    else:
+        ensure_can_touch(user, body.owner_id)
+        owner = body.owner_id
+
+    # 只清落库那份（清理语义只存在于数据库出口；库出口没开就 503 说清楚）
+    names = _channels_of_source(logger, "database")
+    deleted = await logger.delete_before(
+        before=chosen_before, owner_id=owner, processors=names
+    )
+    return ApiResponse[ClearLogsData](
+        data=ClearLogsData(deleted=deleted, before=chosen_before), trace_id=trace_id
     )

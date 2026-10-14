@@ -48,7 +48,6 @@ tickneko    bootstrap.py / wiring.py  组合根：装配各块 + 派发日志核
           ├── workflow/   编排层：图校验 → 落库 → 节点执行器（不 import FastAPI）
           ├── platforms/  平台层：onebot（反向 WS）/ kook（正向 WS）/ bridge（总线与协议）
           ├── bots/       凭证层：跨平台机器人凭证（bot_credentials，可逆加密）
-          ├── db/         数据层：日志 LogStore 实现（logs 表）
           └── core/       核心层：logger / cache / scheduler（不依赖任何上层）
 ```
 
@@ -60,25 +59,24 @@ tickneko    bootstrap.py / wiring.py  组合根：装配各块 + 派发日志核
 | `platforms/bridge` | 桥接层：把各平台适配器统一到「规范化事件 + 能力协议」，`Gateway` 是总线 |
 | `workflow/` | 工作流编排：图校验流水线 + 定义 / 版本落库 + 节点执行器 |
 | `api/` | 对外协议：请求校验、鉴权、6 组路由；内部再分 `api/api`（入口层）→ `api/services`（业务层） |
-| `db/` | 数据库实现（`logs` 表），**自建不建引擎、不读配置** |
 | `bots/` | 通用机器人凭证：一个用户一个机器人 = 一行凭证，跨平台 |
+| `core/logger/store.py` | 日志的落库后端（`logs` 表，sqlite / mariadb 共用），**自建不建引擎、不读配置**（命名同 `workflow/store.py` / `bots/store.py` 的落库惯例） |
 | `bootstrap.py` | 组合根：入口备好「日志核心 + 库引擎」后，由它把各块挂起来跑 |
 | `wiring.py` | 把进程日志核心派发到各业务模块的日志槽位 |
 
 ### 2.2 依赖方向（单向、无环）
 
 ```
-api ──► core / workflow          （api 不 import platforms / db，靠协议接收）
+api ──► core / workflow          （api 不 import platforms，靠协议接收）
 workflow ──► core（logger、scheduler）
 bridge ──► core（logger）+ bots  （只有适配器实现 import 平台包）
-core ──► 自身
-db ──► core.logger 的模型        bots ──► 无 tickneko 依赖
+core ──► 自身                    bots ──► 无 tickneko 依赖
 ```
 
 - **core 只依赖自身**（`redis` 是函数内惰性 import，不装也能用）；
 - **bridge 的协议 / 总线层不 import 平台包** —— 只有 `bridge/onebot.py` / `bridge/kook.py` 两个适配器 import；
 - **platforms 运行时不 import api**（`TokenRegistry` 只在 `TYPE_CHECKING` 下引用，否则会被迫带上 fastapi）；
-- **api 不 import platforms / db**：按 `OneBotLike` / `BotsService` / `WorkflowStoreLike` 协议收实现，缺了回 503；
+- **api 不 import platforms**：按 `OneBotLike` / `BotsService` / `WorkflowStoreLike` 协议收实现，缺了回 503；
 - **workflow 不 import FastAPI**；**bots 不 import 任何 tickneko 包**。
 
 ### 2.3 装配链路（`bootstrap.run()`）
