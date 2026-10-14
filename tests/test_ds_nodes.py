@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from tickneko.core.cache.models import CacheError
+from tickneko.variables.center import VariableTypeConflict
 from tickneko.workflow import (
     NodeExecutionContext,
     WorkflowGraph,
@@ -16,6 +17,7 @@ from tickneko.workflow import (
 )
 from tickneko.workflow.nodes import (
     NodeFailure,
+    exec_cache,
     exec_ds_dict_contains,
     exec_ds_dict_get,
     exec_ds_dict_keys,
@@ -44,6 +46,14 @@ class _FakeCache:
 
     async def delete(self, key: str) -> bool:
         return self.data.pop(key, None) is not None
+
+    # ---- 文本（对齐 cache 节点 set/get）----
+    async def set(self, key: str, value: str) -> None:
+        self.data[key] = value
+
+    async def get(self, key: str) -> str:
+        entry = self.data.get(key)
+        return "" if entry is None else str(entry)
 
     # ---- 列表（对齐 RPUSH/LPUSH/LRANGE/LLEN/RPOP/LPOP，桩用 list 模拟）----
     def _list_entry(self, key: str) -> list[str] | None:
@@ -422,7 +432,7 @@ async def test_ds_dict_object_name_chaining_writes_same_object() -> None:
 # --------------------------------------------------------------------------- ④ 集成：跑一张含 ds 节点的小图
 @pytest.mark.asyncio
 async def test_ds_dict_runs_inside_a_real_graph() -> None:
-    """真实跑图：trigger -> ds-dict-set -> end，缓存键按作用域落在图级前缀下。"""
+    """真实跑图：trigger -> ds-dict-set -> end，缓存键按作用域落在图级变量名上。"""
     from tickneko.workflow import SimpleWorkflowRunner
 
     fake = _FakeCache()
@@ -545,12 +555,11 @@ async def test_ds_list_append_get_contains_length() -> None:
     node_ = WorkflowNode(id="c1", type="ds-list-append", config={"key": "队列"})
     ctx.inputs = {"item": "A"}
     assert (await exec_ds_list_append(node_, ctx))["obj_out"] == "队列"
-    assert fake.data["workflow:graph:w1:队列:meta"] == {"A": "1"}
-    assert "workflow:graph:w1:队列:idx" not in fake.data
+    assert fake.data["workflow:graph:w1:队列:counts"] == {"A": "1"}
     ctx.inputs = {"item": "B"}
     assert (await exec_ds_list_append(node_, ctx))["obj_out"] == "队列"
     assert fake.data["workflow:graph:w1:队列"] == ["A", "B"]
-    assert fake.data["workflow:graph:w1:队列:meta"] == {"A": "1", "B": "1"}
+    assert fake.data["workflow:graph:w1:队列:counts"] == {"A": "1", "B": "1"}
 
     node_ = WorkflowNode(id="c1", type="ds-list-get", config={"key": "队列"})
     ctx.inputs = {"index": "0"}
@@ -580,31 +589,29 @@ async def test_ds_list_double_ended_push_pop() -> None:
     for item in ("A", "B"):
         ctx.inputs = {"item": item}
         _ = await exec_ds_list_append(node_, ctx)
-    assert fake.data["workflow:graph:w1:队列:meta"] == {"A": "1", "B": "1"}
+    assert fake.data["workflow:graph:w1:队列:counts"] == {"A": "1", "B": "1"}
 
     node_ = WorkflowNode(id="c1", type="ds-list-push-left", config={"key": "队列"})
     ctx.inputs = {"item": "0"}
     assert (await exec_ds_list_push_left(node_, ctx))["obj_out"] == "队列"
     assert fake.data["workflow:graph:w1:队列"] == ["0", "A", "B"]
-    assert fake.data["workflow:graph:w1:队列:meta"] == {"0": "1", "A": "1", "B": "1"}
+    assert fake.data["workflow:graph:w1:队列:counts"] == {"0": "1", "A": "1", "B": "1"}
 
     node_ = WorkflowNode(id="c1", type="ds-list-pop-left", config={"key": "队列"})
     assert (await exec_ds_list_pop_left(node_, ctx))["value_out"] == "0"  # 队头弹出
-    assert fake.data["workflow:graph:w1:队列:meta"] == {"A": "1", "B": "1"}
+    assert fake.data["workflow:graph:w1:队列:counts"] == {"A": "1", "B": "1"}
     node_ = WorkflowNode(id="c1", type="ds-list-pop", config={"key": "队列"})
     assert (await exec_ds_list_pop(node_, ctx))["value_out"] == "B"  # 队尾弹出
     assert fake.data["workflow:graph:w1:队列"] == ["A"]
-    assert fake.data["workflow:graph:w1:队列:meta"] == {"A": "1"}
+    assert fake.data["workflow:graph:w1:队列:counts"] == {"A": "1"}
 
     # 弹空不算事故：送默认值，流程继续（计数不跌到负、索引不误删）
     node_ = WorkflowNode(id="c1", type="ds-list-pop", config={"key": "队列"})
     assert (await exec_ds_list_pop(node_, ctx))["value_out"] == "A"
-    assert "workflow:graph:w1:队列:meta" not in fake.data
-    assert "workflow:graph:w1:队列:idx" not in fake.data  # 索引删空后键整个没了
+    assert "workflow:graph:w1:队列:counts" not in fake.data  # 计数删空后键整个没了
     ctx.inputs = {"default": "空了"}
     assert (await exec_ds_list_pop(node_, ctx))["value_out"] == "空了"
-    assert "workflow:graph:w1:队列:meta" not in fake.data
-    assert "workflow:graph:w1:队列:idx" not in fake.data
+    assert "workflow:graph:w1:队列:counts" not in fake.data
 
 
 @pytest.mark.asyncio
@@ -617,11 +624,11 @@ async def test_ds_list_contains_survives_duplicate_items() -> None:
     for item in ("A", "A"):
         ctx.inputs = {"item": item}
         _ = await exec_ds_list_append(node_, ctx)
-    assert fake.data["workflow:graph:w1:队列:meta"] == {"A": "2"}
+    assert fake.data["workflow:graph:w1:队列:counts"] == {"A": "2"}
 
     node_ = WorkflowNode(id="c1", type="ds-list-pop", config={"key": "队列"})
     assert (await exec_ds_list_pop(node_, ctx))["value_out"] == "A"
-    assert fake.data["workflow:graph:w1:队列:meta"] == {"A": "1"}  # 次数 2->1，计数还在
+    assert fake.data["workflow:graph:w1:队列:counts"] == {"A": "1"}  # 次数 2->1，计数还在
 
     node_ = WorkflowNode(id="c1", type="ds-list-contains", config={"key": "队列"})
     ctx.inputs = {"item": "A"}
@@ -662,7 +669,7 @@ async def test_ds_list_raises_on_bad_index_or_enums() -> None:
     with pytest.raises(ValueError, match="index 为空"):
         _ = await exec_ds_list_get(node_, ctx)
 
-    node_ = WorkflowNode(id="c1", type="ds-list-get")
+    node_ = WorkflowNode(id="c1", type="ds-list-get", config={})
     ctx.inputs = {"key": ""}
     with pytest.raises(ValueError, match="key 为空"):
         _ = await exec_ds_list_get(node_, ctx)
@@ -695,3 +702,83 @@ def test_ds_list_fields_are_validated() -> None:
 
     report = validate_graph(graph_with(scope="workflow", key="队列"))
     assert report.valid and report.errors == []
+
+
+# --------------------------------------------------------------------------- 类型守卫：禁止覆盖别的类型
+@pytest.mark.asyncio
+async def test_ds_list_append_rejects_writing_over_cache_variable() -> None:
+    """cache 写过的文本变量，ds-list 再来写 -> 类型冲突当场报错（写前拦截，本体与目录都不动）。"""
+    fake = _FakeCache()
+    ctx = NodeExecutionContext(owner_id="u-admin", workflow_id="w1", cache=fake)
+    # cache 节点先写了「日签」（目录登记为 cache 类型）
+    fake.data["workflow:graph:w1:日签"] = "上班"
+    fake.data["workflow:index:acct:u-admin"] = {"workflow:graph:w1:日签": "cache"}
+
+    node_ = WorkflowNode(id="c1", type="ds-list-append", config={"key": "日签"})
+    ctx.inputs = {"item": "加班"}
+    with pytest.raises(VariableTypeConflict, match="已被 cache 类型登记"):
+        _ = await exec_ds_list_append(node_, ctx)
+
+    assert fake.data["workflow:graph:w1:日签"] == "上班"  # 本体没被改写
+    assert fake.data["workflow:index:acct:u-admin"] == {"workflow:graph:w1:日签": "cache"}  # 目录没被翻新
+
+
+@pytest.mark.asyncio
+async def test_ds_list_actions_all_guard_against_other_types() -> None:
+    """追加、左加、弹出、弹出左，四种写动作统一走守卫：别人的类型一律不碰。"""
+    for action in (
+        exec_ds_list_append,
+        exec_ds_list_push_left,
+        exec_ds_list_pop,
+        exec_ds_list_pop_left,
+    ):
+        fake = _FakeCache()
+        ctx = NodeExecutionContext(owner_id="u-admin", workflow_id="w1", cache=fake)
+        fake.data["workflow:graph:w1:日签"] = "上班"
+        fake.data["workflow:index:acct:u-admin"] = {"workflow:graph:w1:日签": "cache"}
+        node_ = WorkflowNode(id="c1", type="ds-list-append", config={"key": "日签"})
+        ctx.inputs = {"item": "x"} if action is not exec_ds_list_pop else {}
+        with pytest.raises(VariableTypeConflict, match="已被 cache 类型登记"):
+            _ = await action(node_, ctx)
+        assert fake.data["workflow:graph:w1:日签"] == "上班"
+
+
+@pytest.mark.asyncio
+async def test_same_type_rewrites_are_allowed() -> None:
+    """同类型反复写不受影响：ds-list 自己追加自己、cache 自己覆盖自己，照常。"""
+    fake = _FakeCache()
+    ctx = NodeExecutionContext(owner_id="u-admin", workflow_id="w1", cache=fake)
+
+    node_ = WorkflowNode(id="c1", type="ds-list-append", config={"key": "队列"})
+    for item in ("A", "B", "A"):
+        ctx.inputs = {"item": item}
+        _ = await exec_ds_list_append(node_, ctx)
+    assert fake.data["workflow:graph:w1:队列"] == ["A", "B", "A"]
+    assert fake.data["workflow:index:acct:u-admin"] == {"workflow:graph:w1:队列": "ds-list"}
+
+    # cache 再覆盖 cache 写的变量：同类型放行
+    ctx.inputs = {"key": "日签", "value": "上班"}
+    cache_node = WorkflowNode(id="ca1", type="cache", config={"action": "set"})
+    _ = await exec_cache(cache_node, ctx)
+    ctx.inputs = {"key": "日签", "value": "加班"}
+    _ = await exec_cache(cache_node, ctx)
+    assert fake.data["workflow:graph:w1:日签"] == "加班"
+    assert fake.data["workflow:index:acct:u-admin"] == {
+        "workflow:graph:w1:队列": "ds-list",
+        "workflow:graph:w1:日签": "cache",
+    }
+
+
+@pytest.mark.asyncio
+async def test_cache_set_rejects_writing_over_ds_list_variable() -> None:
+    """反过来：ds-list 写过的队列，cache 再来 set -> 类型冲突，本体不动。"""
+    fake = _FakeCache()
+    ctx = NodeExecutionContext(owner_id="u-admin", workflow_id="w1", cache=fake)
+    fake.data["workflow:graph:w1:队列"] = ["a"]
+    fake.data["workflow:index:acct:u-admin"] = {"workflow:graph:w1:队列": "ds-list"}
+
+    node_ = WorkflowNode(id="ca1", type="cache", config={"action": "set"})
+    ctx.inputs = {"key": "队列", "value": "x"}
+    with pytest.raises(VariableTypeConflict, match="已被 ds-list 类型登记"):
+        _ = await exec_cache(node_, ctx)
+    assert fake.data["workflow:graph:w1:队列"] == ["a"]
