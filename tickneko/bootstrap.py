@@ -119,34 +119,23 @@ async def on_platform_event(event: PlatformEvent) -> None:
     ``kind=message`` 的事件拆成普通数据（``trigger_data`` + ``owner_id`` / ``user_id``）交给
     消息路由（``MessageRouter.dispatch``）触发 ``trigger=message`` 的工作流 —— 「PlatformEvent
     拆成普通数据」这一步就发生在这里，消息路由本身不 import bridge，依赖方向不破。
+
+    事件的审计日志（收到消息 / 收到事件）统一由 ``Gateway.publish`` 记，这里只做分发。
     """
-    log = default_core().child("bridge")
+    # 事件本身的审计日志（收到消息 / 收到事件）由 Gateway.publish 统一记一份，
+    # 这里只管业务分发、不再重复记日志。
     if event.kind == "meta":
-        # 连接生命周期 / 心跳一类：与业务无关，静默（只留 debug，不刷 INFO）
-        log.debug(
-            "收到元事件",
-            platform=event.platform,
-            owner_id=event.owner_id,
-            kind=event.kind,
-        )
+        # 连接生命周期 / 心跳一类：与业务无关，静默（审计日志 Gateway 已记）
         return
     if event.kind != "message":
         # 通知 / 请求（加好友、进群、撤回、戳一戳…）：交给**事件路由**，
         # 触发订阅了这种事件的 trigger=event 工作流；没订阅就没人跑（路由内部按类型匹配）。
         await _dispatch_event(event)
         return
-    log.info(
-        "收到事件",
-        platform=event.platform,
-        owner_id=event.owner_id,
-        kind=event.kind,
-        chat=event.chat,
-        chat_id=event.chat_id,
-        user_id=event.user_id,
-    )
     router = _message_router
     if router is None:
         return  # 装配还没走到建路由（或没配消息触发）—— 不该发生，防御性放过
+    log = default_core().child("bridge")
     try:
         await router.dispatch(
             event.owner_id,

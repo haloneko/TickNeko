@@ -64,9 +64,28 @@ class Gateway:
     async def publish(self, event: PlatformEvent) -> None:
         """投递口：适配器翻译完事件后调它（构造时从 Gateway 拿走的那个 callable）。
 
-        按订阅顺序逐个 ``await``；某个订阅者抛异常只记日志（platform / owner_id /
+        每条事件先落一条**审计日志**（``event_*`` 结构化字段：平台 / 事件类型 / 会话 /
+        引起者 / 正文），日志页不用展开 JSON 就能看全，按归属 / 模块也筛得到——这是
+        整个 bridge 唯一一处「收到事件」的记录点，平台无关、不随适配器各自记而重复。
+        然后按订阅顺序逐个 ``await``；某个订阅者抛异常只记日志（platform / owner_id /
         堆栈），后面的订阅者照常收到 —— 事件分发尽力而为，不因一家失败整条停摆。
         """
+        # 消息类事件单独叫「收到消息」，其余（通知 / 请求 / 元事件）统一叫「收到事件」，
+        # 关键字筛选不用展开 extra 就能分开两类。
+        self._log.info(
+            "收到消息" if event.kind == "message" else "收到事件",
+            owner_id=event.owner_id,
+            event_platform=event.platform,
+            event_self_id=event.self_id,
+            event_kind=event.kind,
+            event_type=event.event_type,
+            event_chat=event.chat,
+            event_chat_id=event.chat_id,
+            event_user_id=event.user_id,
+            event_message_id=event.message_id,
+            event_text=event.text,
+            event_time=event.time,
+        )
         if not self._subscribers:
             self._log.debug(
                 "事件无人订阅，已丢弃",
