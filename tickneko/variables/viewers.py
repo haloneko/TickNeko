@@ -1,12 +1,20 @@
-"""显式注册的基础查看器；节点可复用或覆写，见 docs/variables/variables.md。"""
+"""显式注册的四种基础变量类型；节点可复用或覆写，见 docs/variables/variables.md。
 
+四种覆盖缓存后端的四种结构：``string``（文本）/ ``json``（文本里的 JSON）/ ``list``（列表）
+/ ``hash``（字典）。节点自己那种变量（缓存节点的缓存、列表节点的计数列表）继承它们，只改
+``type_id`` / ``label`` / 联动规则。
+"""
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from .registry import register_variable_viewer
-from .variable_viewer import VariableContext, VariableView, VariableViewer
+from .viewer import (
+    VariableContext,
+    VariableView,
+    VariableViewer,
+    register_variable_viewer,
+)
 
 
 def _invalid_constant(value: str) -> None:
@@ -15,6 +23,8 @@ def _invalid_constant(value: str) -> None:
 
 class StringViewer(VariableViewer):
     view_type = "str"
+    type_id = "str"
+    label = "文本"
     priority = 0
     storage_types = ("string",)
 
@@ -37,10 +47,13 @@ class StringViewer(VariableViewer):
         await self.context.cache.set(
             self.context.full_key, value, ttl=await self.write_ttl()
         )
+        await self._sync_index()  # 写变量后登记进所属用户目录，枚举免扫描
 
 
 class JsonViewer(StringViewer):
     view_type = "json"
+    type_id = "json"
+    label = "JSON"
     priority = 10
 
     @classmethod
@@ -73,10 +86,13 @@ class JsonViewer(StringViewer):
 
 class ListViewer(VariableViewer):
     view_type = "list"
+    type_id = "list"
+    label = "列表"
     priority = 0
     storage_types = ("list",)
-    # 无来源 / 无键族证据的 list 可能是缺少辅助键的 ds-list，禁止通用写入。
+    # 无来源 / 无键族证据的 list 可能是缺少辅助键的 ds-list：不许通用写入。
     probe_editable = False
+    read_only = True
 
     @classmethod
     async def probe(cls, context: VariableContext) -> bool:
@@ -109,10 +125,13 @@ class ListViewer(VariableViewer):
             await cache.delete(key)
         if items:
             await cache.list_push_right(key, *items, ttl=ttl)
+        await self._sync_index()  # 写变量后登记进所属用户目录，枚举免扫描
 
 
 class DictViewer(VariableViewer):
     view_type = "dict"
+    type_id = "dict"
+    label = "字典"
     priority = 0
     storage_types = ("hash",)
 
@@ -151,6 +170,7 @@ class DictViewer(VariableViewer):
             await cache.delete(key)
         if fields:
             await cache.hash_set(key, fields, ttl=ttl)
+        await self._sync_index()  # 写变量后登记进所属用户目录，枚举免扫描
 
 
 for _viewer in (StringViewer, JsonViewer, ListViewer, DictViewer):

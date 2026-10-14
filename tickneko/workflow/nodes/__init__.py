@@ -4,8 +4,6 @@
       base.py            契约：NodeExecutor / NodeSpec / ConfigField / PortSpec / 运行时上下文
       port_types.py      端口类型定义表（唯一常改的地方：画布配色 / 图例 / 数据流语义都从它来）
       registry.py        注册表：register_node / declare_node_type / get_spec / load_node_modules
-      variable_viewer.py  查看器契约：可信上下文、匹配规则、view / add 与展示结果
-      variable_viewers.py 显式基础兜底：str / json / list / dict
       triggers.py        内置节点：三个触发器（trigger-message 消息 / trigger-time 定时 / trigger-event 事件）
       end.py             内置节点：end（图终点）
       log.py             内置节点：log（按级别写业务日志）
@@ -19,7 +17,7 @@
       condition.py       内置节点：condition（条件分支：true / false 双出口，引擎按选中出口剪枝）
       send.py            内置节点：send（把 message 发到 target 指向的会话：去向走 target 值端口 + 内容端口，走 ctx.gateway.reply；没有 target 就不发，回执不成功不打断流程）
       operator.py        内置节点：operator（算术：+ - * / %，结果文本化；算不出来送空串）
-      cache.py           内置节点：cache（变量存取：get / set；作用域账号 / 图，前缀区分）
+      cache.py           内置节点：cache（变量存取：get / set；作用域账号 / 图，变量名即身份）
       ds_dict.py         内置节点：键值对系列（ds-dict-set 设值 / -get 取值 / -contains 查存在 / -remove 删除 / -keys 取键列表 / -length 条目数，一个节点一个动作，写动作隐式创建；变量名与键名都能接线或手填，每个节点从 obj_out 送出本次操作的变量名，接给下一个键值对节点就是同一个对象接着改）
       ds_container.py    内置节点：列表队列系列（ds-list-append 追加队尾 / -push-left 头插 / -get 按下标取 / -contains 查存在 / -pop 队尾弹出 / -pop-left 队头弹出 / -length 长度，一个节点一个动作，不用选动作；队列原子操作 O(1)，contains 走存在性索引）
       placeholder.py     内置节点：placeholder（占位：只透传不做事，参与画布理线）
@@ -57,6 +55,19 @@
 """
 
 from __future__ import annotations
+
+from tickneko.variables import (
+    DictViewer,
+    JsonViewer,
+    ListViewer,
+    StringViewer,
+    VariableContext,
+    VariableRule,
+    VariableView,
+    VariableViewer,
+    register_variable_viewer,
+    registered_variable_viewers,
+)
 
 from .base import (
     CATEGORY_LABELS,
@@ -117,11 +128,7 @@ from .registry import (
     register_executor,
     register_node,
     registered_types,
-    register_variable_viewer,
-    registered_variable_viewers,
 )
-from .variable_viewer import VariableContext, VariableRule, VariableView, VariableViewer
-from .variable_viewers import DictViewer, JsonViewer, ListViewer, StringViewer
 from .test import exec_test
 from .triggers import (
     EVENT_TYPE_LABELS,

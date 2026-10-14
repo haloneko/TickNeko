@@ -2559,11 +2559,13 @@ class _FakeCache:
     """假的缓存门面（鸭子形状对齐 ``tickneko.core.cache.Cache``：``get`` / ``set`` 两个异步方法）。
 
     单元测试里不碰进程级单例（它没 ``start()``，直接调会抛 ``CacheError``）—— 给 ctx
-    注入这个假对象即可。
+    注入这个假对象即可。set 动作写完顺带向变量中枢报到（目录 ``hash_set`` + 属性表），
+    所以假门面也补上最小的 hash 操作。
     """
 
     def __init__(self) -> None:
         self.data: dict[str, str] = {}
+        self.hashes: dict[str, dict[str, str]] = {}
 
     async def get(self, key: str) -> str | None:
         return self.data.get(key)
@@ -2571,10 +2573,30 @@ class _FakeCache:
     async def set(self, key: str, value: str, ttl: float | None = None) -> None:
         self.data[key] = value
 
+    async def exists(self, key: str) -> bool:
+        return key in self.data or key in self.hashes
+
+    async def hash_set(self, key: str, items: dict[str, str], ttl: float | None = None) -> int:
+        self.hashes.setdefault(key, {}).update(items)
+        return len(items)
+
+    async def hash_get(self, key: str, field: str) -> str | None:
+        stored = self.hashes.get(key)
+        return None if stored is None else stored.get(field)
+
+    async def hash_delete(self, key: str, *fields: str) -> int:
+        stored = self.hashes.get(key)
+        if stored is None:
+            return 0
+        removed = sum(1 for field in fields if stored.pop(field, None) is not None)
+        if not stored:
+            self.hashes.pop(key, None)
+        return removed
+
 
 @pytest.mark.asyncio
-async def test_cache_set_then_get_roundtrip_with_scoped_prefixes() -> None:
-    """set 写、get 读（值按文本存）；缓存键用前缀区分作用域：账号级带归属、图级带图 id。"""
+async def test_cache_set_then_get_roundtrip_with_scoped_keys() -> None:
+    """set 写、get 读（值按文本存）；缓存键按作用域分段：账号级带归属、图级带图 id（没有前缀段）。"""
     fake = _FakeCache()
     ctx_ = NodeExecutionContext(owner_id="u-admin", workflow_id="w1", cache=fake)
 
@@ -2583,22 +2605,28 @@ async def test_cache_set_then_get_roundtrip_with_scoped_prefixes() -> None:
         ctx_.inputs = dict(inputs)
         return await exec_cache(node_, ctx_)
 
-    # set：写进归属前缀下，输出把写进去的值回传（下游接着用）
+    # set：写进归属键下，输出把写进去的值回传（下游接着用）
     result = await run("set", key="日签", value="上班")
     assert fake.data == {"workflow:acct:u-admin:日签": "上班"}
     assert result["cache_value"] == "上班"
     assert any("[cache] ca1: set workflow:acct:u-admin:日签 = 上班" in line for line in ctx_.log)
+    # 写完顺带报到：目录里登记「这条键是什么类型」，属性表落 read_only
+    assert fake.hashes["workflow:index:acct:u-admin"] == {"workflow:acct:u-admin:日签": "cache"}
+    assert fake.hashes["workflow:acct:u-admin:日签:meta"] == {"read_only": "false"}
 
     # get：同一个键读回来
     result = await run("get", key="日签")
     assert result["cache_value"] == "上班"
     assert any("-> 上班" in line for line in ctx_.log)
 
-    # 图级作用域换前缀；线上送整数（now_ts 那种）也会转成文本
+    # 图级作用域换段名与归属；线上送整数（now_ts 那种）也会转成文本
     node_ = WorkflowNode(id="ca1", type="cache", config={"action": "set", "scope": "workflow"})
     ctx_.inputs = {"key": "计数", "value": 42}
     await exec_cache(node_, ctx_)
     assert fake.data["workflow:graph:w1:计数"] == "42"
+    # 图级键里只有图 id，归属靠上下文带给中枢：仍落在这张图的主人的目录里
+    assert fake.hashes["workflow:index:acct:u-admin"] == {
+        "workflow:acct:u-admin:日签": "cache", "workflow:graph:w1:计数": "cache"}
 
 
 @pytest.mark.asyncio
@@ -2669,7 +2697,7 @@ async def test_cache_raises_on_missing_key_and_owner_or_bad_enums() -> None:
 
 
 def test_cache_fields_are_validated() -> None:
-    """两块枚举在语义阶段拦住（INVALID_CACHE_ACTION / INVALID_CACHE_SCOPE）；key 必填照常。"""
+    """枚举在语义阶段拦住（INVALID_CACHE_ACTION / SCOPE）；key 变量名必填照常。"""
 
     def graph_with(**config: object) -> dict[str, object]:
         return {

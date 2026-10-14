@@ -21,8 +21,6 @@ tickneko/workflow/
 ├── nodes/           ★ 节点执行器：一类节点一个文件 + 注册表（**写自己的节点看这里**）
 │   ├── base.py          契约：NodeExecutor / NodeSpec / ConfigField / PortSpec / NodeExecutionContext
 │   ├── registry.py      注册表：register_node / declare_node_type / get_spec / load_node_modules
-│   ├── variable_viewer.py   变量查看器契约：上下文 / 匹配规则 / view / add
-│   ├── variable_viewers.py  显式基础查看器；接入规则见 ../variables/variables.md
 │   ├── triggers.py      内置：三个触发器（trigger-message 消息 / trigger-time 定时 / trigger-event 事件）
 │   ├── end.py           内置：end（图终点）
 │   ├── log.py           内置：log（按级别写业务日志；内容从 message 入口来）
@@ -39,7 +37,7 @@ tickneko/workflow/
 │   ├── unpack.py        内置：unpack-onebot / unpack-kook（会话解包：把会话定位拆成字符串字段，号统一字符串化）
 │   ├── pack.py          内置：pack-onebot / pack-kook（会话封装：把字符串字段拼回会话定位，走 gateway.make_target）
 │   ├── operator.py      内置：operator（算术：+ - * / %；结果文本化，算不出来 = 业务失败）
-│   ├── cache.py         内置：cache（变量存取：get / set；读不到回默认值；作用域账号 / 图，键前缀区分）
+│   ├── cache.py         内置：cache（变量存取：get / set；读不到回默认值；作用域账号 / 图，键 = 作用域 + 变量名）
 │   └── placeholder.py   内置：placeholder（占位：只透传不做事，参与画布理线）
 ├── graph.py         图的小工具：出边索引 / 可达集合 / 入口节点 / 边端口（校验器与运行器共用）
 ├── executor.py      运行器：只跑 start 可达的主流程，按拓扑顺序执行 + **按边投递数据** + **按选中出口剪枝**
@@ -55,6 +53,8 @@ validator ──────────► nodes.registry / nodes.base（读注
 store ──────────────► models
 ```
 
+- 变量查看器契约与基础查看器**不在本包**：`tickneko/variables/`（键布局 / 中枢 / 查看器契约），
+  节点只用 `NodeSpec.variable_viewer` 声明，接入规则见 [变量文档](../variables/variables.md)；
 - `nodes/` 只依赖 `models`：**节点不需要知道**运行器、校验器、存储的存在；
 - 运行器按**类型名**从注册表取执行函数，不认识任何具体节点；
 - 本包不 import FastAPI（HTTP 入口在 `tickneko/api/api/workflow/`，装配在 `tickneko/api/app.py`）。
@@ -177,7 +177,7 @@ workflow_versions             每次保存一张不可变图快照
 | `unpack.py` | **会话解包**（`unpack-onebot` / `unpack-kook`）：把会话定位**拆成字符串字段**（平台 / 会话类型 / 会话号 / 发送者 / 消息号 / 归属），号统一字符串化（OneBot 整数 -> 字符串；缺的字段给空串）；收到**别平台**的 target 当场 `ValueError`（装配错位看得见）；没有会话定位送**全空串**、不打断流程 | `trigger` / `target` → `trigger` / `platform` / `chat` / `chat_id` / `user_id` / `message_id` / `owner_id` | 无（`target` 只能接线，不能手填 —— 会话定位是结构值） |
 | `pack.py` | **会话封装**（`pack-onebot` / `pack-kook`）：把字段**拼回**会话定位（unpack 的逆操作）—— 平台写死在节点上，走 `ctx.gateway.make_target`，适配器按平台口径转号；会话号不全不额外拦（reply 时说明缺什么）；没接总线 = 环境问题当场抛 | `trigger` / `chat` / `chat_id` → `trigger` / `target` | `chat`（group / private）、`chat_id`（**按会话类型解释的号**：群聊填群号 / 频道号，私聊填对方账号；都可接线，接上覆盖手填）。**只要这两样** —— 对方号由适配器用 `chat_id` 兜底，消息号是「撤回 / 引用回复」一类动作才要的 |
 | `operator.py` | **运算**：对两个操作数做一次算术（`+` / `-` / `*` / `/` / `%`）；`/` 是真除法、`%` 按 Python 语义，结果文本化（整数值不带小数点）；算不出来（空值 / 非数字 / 除数为 0 / 运算符不合法）= **业务失败**：抛 `NodeFailure`，停止向下传播 | `trigger` / `left` / `right` → `trigger` / `operator_result` | `left` / `right`（**入口**必填：接线或手填）、`operator`（缺省 `+`，枚举由自注册校验器把） |
-| `cache.py` | **缓存**：把一个变量存进缓存 / 取回来 —— **跨执行（跨工作流）传递状态**的通道；`get` 没取到不算事故（回 `default` 默认值，没填就是空串），`set` 空值 = 清成空串；`key` 入口没接线也没填 / 账号作用域却没有归属 → 当场抛；缓存键按作用域拼前缀（`workflow:graph:{图 id}:{键}` / `workflow:acct:{账号 id}:{键}`） | `trigger` / `key` / `value` / `default` → `trigger` / `cache_value` | `action`（缺省 `get`）、`scope`（缺省 `workflow`；枚举都由自注册校验器把）、`key`（**入口**必填：接线或手填）、`value`（手填兜底，也能接线）、`default`（`get` 读不到时的默认值，手填兜底 / 也能接线） |
+| `cache.py` | **缓存**：把一个变量存进缓存 / 取回来 —— **跨执行（跨工作流）传递状态**的通道；`get` 没取到不算事故（回 `default` 默认值，没填就是空串），`set` 空值 = 清成空串；`key` 入口没接线也没填 / 账号作用域却没有归属 → 当场抛；缓存键 = 作用域 + 变量名（`workflow:graph:{图 id}:{变量名}` / `workflow:acct:{账号 id}:{变量名}`，**没有前缀段**；写完向变量中枢报到，变量列表才看得到） | `trigger` / `key` / `value` / `default` → `trigger` / `cache_value` | `action`（缺省 `get`）、`scope`（缺省 `workflow`；枚举都由自注册校验器把）、`key`（**入口**必填：接线或手填）、`value`（手填兜底，也能接线）、`default`（`get` 读不到时的默认值，手填兜底 / 也能接线） |
 
 > **「入口」= 字段名与端口 id 同名的那个数据端口**：`log.message` / `http.url` / `http.body` 都能
 > 被连线覆盖 —— **线上的值优先，没接线才用 config 里手填的**（`input_value` 就是这个口径）。

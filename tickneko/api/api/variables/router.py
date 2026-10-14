@@ -7,7 +7,7 @@ from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Body, Query, Request, status
 
-from tickneko.workflow.nodes.variable_viewer import VariableContext
+from tickneko.variables import VariableContext, VariableTypeConflict
 
 from ...common.dependencies import trace_id_of
 from ...common.errors import ApiError, ErrorCode, HttpStatus
@@ -18,7 +18,7 @@ from ..auth.dependencies import CurrentUserDep
 from ..onebot.dependencies import ensure_can_touch
 from ..workflow.dependencies import WorkflowStoreDep, owner_filter_of
 from .dependencies import CacheDep
-from .responses import VariableData, VariablePage
+from .responses import VariableData, VariablePage, VariableSummary
 
 router = APIRouter(prefix="/variables", tags=["变量查看"])
 ALL_SCOPES: tuple[str, ...] = ("graph", "account")
@@ -68,6 +68,11 @@ async def _call(operation: Awaitable[_T]) -> _T:
         raise ApiError(
             ErrorCode.HTTP_ERROR, str(exc), status_code=status.HTTP_409_CONFLICT
         ) from exc
+    except VariableTypeConflict as exc:
+        # 与运行时同一套守卫：写前拦截的「类型冲突」走同一个 409，文案也归一
+        raise ApiError(
+            ErrorCode.HTTP_ERROR, str(exc), status_code=status.HTTP_409_CONFLICT
+        ) from exc
 
 
 async def _context(
@@ -97,7 +102,7 @@ async def _context(
 @router.get(
     "",
     response_model=ApiResponse[VariablePage],
-    summary="列出逻辑变量",
+    summary="列出变量（只含元数据）",
     responses=_RESPONSES,
 )
 async def list_variables(
@@ -129,7 +134,7 @@ async def list_variables(
             offset=offset,
         )
     )
-    items = [VariableData.from_snapshot(snapshot) for snapshot in snapshots]
+    items = [VariableSummary.from_snapshot(snapshot) for snapshot in snapshots]
     return ApiResponse[VariablePage](
         data=VariablePage(items=items, total=total), trace_id=trace_id_of(request)
     )
@@ -153,7 +158,12 @@ async def view_variable(
 ) -> ApiResponse[VariableData]:
     service = VariableService(cache, store)
     context = await _context(
-        service, user, scope=scope, key=key, owner_id=owner_id, workflow_id=workflow_id
+        service,
+        user,
+        scope=scope,
+        key=key,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
     )
     snapshot = await _call(service.view(context))
     return ApiResponse[VariableData](
@@ -180,9 +190,45 @@ async def add_variable(
 ) -> ApiResponse[VariableData]:
     service = VariableService(cache, store)
     context = await _context(
-        service, user, scope=scope, key=key, owner_id=owner_id, workflow_id=workflow_id
+        service,
+        user,
+        scope=scope,
+        key=key,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
     )
     snapshot = await _call(service.add(context, params))
     return ApiResponse[VariableData](
         data=VariableData.from_snapshot(snapshot), trace_id=trace_id_of(request)
+    )
+
+
+@router.delete(
+    "",
+    response_model=ApiResponse[dict[str, bool]],
+    summary="删除变量",
+    responses=_RESPONSES,
+)
+async def delete_variable(
+    request: Request,
+    user: CurrentUserDep,
+    cache: CacheDep,
+    store: WorkflowStoreDep,
+    scope: str,
+    key: str,
+    owner_id: str | None = None,
+    workflow_id: str = "",
+) -> ApiResponse[dict[str, bool]]:
+    service = VariableService(cache, store)
+    context = await _context(
+        service,
+        user,
+        scope=scope,
+        key=key,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
+    )
+    await _call(service.delete(context))
+    return ApiResponse[dict[str, bool]](
+        data={"deleted": True}, trace_id=trace_id_of(request)
     )

@@ -13,8 +13,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
+from tickneko.core.cache import cache as process_cache
 from tickneko.core.logger import BaseLogger, BoundLogger
 from tickneko.core.scheduler import TaskManager
+from tickneko.variables import VariableCenter
 
 from .executor import NodeExecutionContext, SimpleWorkflowRunner
 from .graph import start_ids
@@ -24,6 +26,10 @@ from .nodes import get_executor, get_spec, workflow_task_id
 
 if TYPE_CHECKING:
     from .store import SqlWorkflowStore
+
+#: 变量中枢：**进程内一个**，绑进程级缓存。运行时把它注入执行上下文（workflow -> nodes），
+#: 节点经由 ``ctx.variables`` 进出缓存里的变量；接口层用同一个中枢时直接取它。
+variable_center = VariableCenter(process_cache)
 
 
 def _log() -> BaseLogger | BoundLogger:
@@ -139,6 +145,7 @@ async def run_published_workflow(
         owner_id=owner_id,
         user_id=user_id,
         gateway=gateway,
+        variables=variable_center,  # 变量中枢由工作流这一层注入，节点只跟上下文打交道
     )
     if trigger_data is not None:
         ctx.trigger_data = dict(trigger_data)
@@ -228,6 +235,7 @@ async def register_published_workflow(
         multi_instance=definition.multi_instance if definition is not None else False,
         owner_id=owner_id,
         gateway=gateway,
+        variables=variable_center,  # 同 make_trigger：中枢只由工作流这一层注入
     )
     primed = 0
     for node in graph.nodes:

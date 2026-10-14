@@ -40,10 +40,10 @@ from tickneko.core.cache import cache as process_cache
 from tickneko.core.logger import BaseLogger, BoundLogger, ChildLogger
 from tickneko.core.scheduler import TaskManager
 
+from ...variables import VariableCenter, VariableKey, VariableViewer
 from ..logging import workflow_logger
 from ..models import ValidationIssue, WorkflowNode
 from .port_types import PortType
-from .variable_viewer import VariableViewer
 
 #: 节点执行函数：(节点, 上下文) -> 本节点产出（键 = 已声明的输出端口名）
 NodeExecutor = Callable[[WorkflowNode, "NodeExecutionContext"], Awaitable[dict[str, Any]]]
@@ -271,26 +271,6 @@ def input_value(
     return node.config.get(name, default)
 
 
-def cache_key(node: WorkflowNode, ctx: NodeExecutionContext, scope: str, key: str) -> str:
-    """拼缓存键：**用前缀区分作用域**（账号级带归属 id、图级带图 id）。
-
-    这是 cache 节点与 ds-*（数据结构）节点共用的键规则：``workflow`` 作用域落在
-    ``workflow:graph:{workflow_id}:{key}``、``account`` 落在 ``workflow:acct:{owner_id}:{key}``。
-    离线跑（没挂到具体图上）时图级前缀是 ``local``（:data:`NO_WORKFLOW_ID`）；账号级没有
-    归属就当场抛 —— 不知道是谁的缓存不能瞎写。
-
-    :raises ValueError: 账号级作用域但上下文不知道归属（``owner_id`` 为空）。
-    """
-    if scope == "account":
-        if not ctx.owner_id:
-            raise ValueError(
-                f"节点 {node.id} 的作用域是账号级，但不知道归属（owner_id 为空）"
-                "：离线跑请改用 workflow 作用域"
-            )
-        return f"workflow:acct:{ctx.owner_id}:{key}"
-    return f"workflow:graph:{ctx.workflow_id}:{key}"
-
-
 class NodeExecutionContext:
     """节点运行时上下文：本节点的入口值 + 日志 + 调度器 + 可用的服务（平台总线 / 缓存）。
 
@@ -325,6 +305,8 @@ class NodeExecutionContext:
         ``async set(key, value, ttl=None)`` —— 即 ``tickneko.core.cache.Cache``）。
         **缺省就是进程级那一个**（``tickneko.core.cache.cache``，主程序启动时已 ``start()``），
         测试 / 特殊场合可以注入自己的门面；``cache`` 节点靠它存取变量。
+    :param variables: 变量中枢（:class:`~tickneko.variables.center.VariableCenter`）。缺省按
+        上面那个缓存门面新配一个；要跟别处共用一张目录表（接口层 / 装配层）时注入同一个。
     """
 
     def __init__(
@@ -340,6 +322,7 @@ class NodeExecutionContext:
         user_id: str = NO_USER_ID,
         gateway: Any | None = None,
         cache: Any | None = None,
+        variables: VariableCenter | None = None,
     ) -> None:
         self.inputs: dict[str, Any] = {}
         self.trigger_data: dict[str, Any] = {}  # 消息触发的入口数据（start 的 message 端口）
@@ -357,6 +340,10 @@ class NodeExecutionContext:
         self.gateway: Any | None = gateway
         #: 缓存门面（鸭子形状见类文档）；缺省落进程级单例（正式跑由主程序启动，见 bootstrap）
         self.cache: Any = cache if cache is not None else process_cache
+        #: 变量中枢：键布局 / 用户目录 / 属性表都由它管，节点不自己拼键（缺省按门面新配一个）
+        self.variables: VariableCenter = (
+            variables if variables is not None else VariableCenter(self.cache)
+        )
         base: BaseLogger | ChildLogger | BoundLogger = (
             logger if logger is not None else workflow_logger()
         )
@@ -384,3 +371,72 @@ class NodeExecutionContext:
         """cron 到点时触发整条流程的回调。"""
         if self._run is not None:
             await self._run()
+
+    def variable(self, scope: str, name: str) -> VariableKey:
+        """按作用域算出变量的身份（键怎么拼由变量中枢定，节点不自己拼字符串）。
+
+        **用户隔离由这一层负责**：图级用这趟跑的 ``workflow_id``，账号级用工作流的主人
+        ``owner_id`` —— 上游把归属交给上下文，中枢按归属者分目录。节点 config 里的作用域
+        口径是 ``workflow`` / ``account``（画布下拉就这么写），在这里翻成中枢的
+        ``graph`` / ``account``。
+
+        :raises ValueError: 账号级作用域但上下文不知道归属（``owner_id`` 为空）。
+        """
+        return self.variables.key(
+            "account" if scope == "account" else "graph",
+            name,
+            owner_id=self.owner_id,
+            workflow_id=self.workflow_id,
+        )
+
+    async def remember_variable(
+        self, key: VariableKey, type_id: str, *, read_only: bool = False
+    ) -> None:
+        """写完变量本体后向中枢报到：登记进所属用户目录 + 落属性表。
+
+        ``type_id`` 是**写它的节点**注册的变量类型（``VariableViewer.type_id``）：同名不同
+        节点的变量靠它区分，枚举时也不用反查图；``read_only`` 落进属性表，代表「这种变量
+        生来不给手改」。中枢幂等，重复报到无害。
+
+        图级变量的键里没有归属，所以得把**这张图的主人**（``owner_id``）带给中枢，目录才
+        会分到主人名下（账号级键自带归属，带不带都一样）。
+        """
+        await self.variables.remember(
+            key, type_id, owner_id=self.owner_id, read_only=read_only
+        )
+
+    async def write_variable(
+        self,
+        key: VariableKey,
+        type_id: str,
+        writer: Callable[[str], Awaitable[Any] | Any],
+        *,
+        read_only: bool = False,
+    ) -> Any:
+        """变量层**唯一写入口**：守卫 -> 执行写动作 -> 报到，一步到位。
+
+        节点只声明「以什么类型、怎么写」，不再各自调 :meth:`ensure_variable_type` ——
+        类型冲突在**写本体之前**就被拦下，报错时本体没被改写；写成功后目录与属性表自动
+        同步。``writer`` 是实际写本体的动作（同步 / 异步均可），**完整键由中枢注入**
+        （writer 的唯一参数，节点不用自己拼键），返回值原样透出。实现见
+        :meth:`VariableCenter.write_variable`。
+        """
+        return await self.variables.write_variable(
+            key, type_id, writer, owner_id=self.owner_id, read_only=read_only
+        )
+
+    async def ensure_variable_type(self, key: VariableKey, type_id: str) -> None:
+        """**写本体之前**先过类型守卫：同一变量已被别的类型登记 -> 当场报错，禁止覆盖。
+
+        内置写节点已收敛到 :meth:`write_variable`（守卫在写入口里自动做），不需要再单独调
+        它；给第三方 / 扩展节点保留：想手动守卫时用（等价于 ``self.variables.guard``）。
+        """
+        await self.variables.guard(key, type_id, owner_id=self.owner_id)
+
+    async def forget_variable(self, key: VariableKey) -> None:
+        """变量本体消失（弹空 / 被删）后向中枢报告：清属性表与节点私有结构，**目录登记保留**。
+
+        类型墓碑：本体没了类型还在（别的类型仍写不进来）；要真正注销类型只能走接口删除
+        （``VariableService.delete`` -> ``VariableCenter.drop``）。
+        """
+        await self.variables.forget(key)

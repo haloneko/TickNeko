@@ -4,8 +4,9 @@
 
 > 本模块文档是**核心层**（一套可换后端的键值存取设施）。缓存还有**第二层**：
 > 工作流里的 `cache` 节点（`tickneko/workflow/nodes/cache.py`）—— 它负责把「跨执行记住
-> 状态」这件事翻译成核心层的 `get` / `set` 调用，并自己定下**键前缀与作用域**。两层关系
-> 与节点层的设计见文末「缓存节点」一节；节点层只碰核心层门面，不感知后端差异。
+> 状态」这件事翻译成核心层的 `get` / `set` 调用，并按**作用域 + 变量名**定下键、向变量
+> 中枢报到。两层关系与节点层的设计见文末「缓存节点」一节；节点层只碰核心层门面，不感知
+> 后端差异。
 
 ## 设计要点
 
@@ -123,8 +124,10 @@ await cache.start()
 | `{token_hash}` | 令牌摘要（sha256 十六进制） | 会话系统 | 哪一条会话 |
 | `workflow` | 硬编码（`nodes/cache.py`） | 工作流系统 | **系统段**：这套键是工作流系统的 |
 | `graph` / `acct` | 节点 `scope` | cache 节点 | **用途段**：变量作用域（图级 / 账号级） |
-| `{图 id}` / `{账号 id}` | `ctx.workflow_id` / `ctx.owner_id` | cache 节点 | 这份变量属于哪张图 / 哪个账号 |
-| `{变量名}` | 节点 `key`（接线或手填） | cache 节点 | 最终业务键 |
+| `{图 id}` / `{账号 id}` | `ctx.workflow_id` / `ctx.owner_id` | cache 节点 / 变量中枢 | 这份变量属于哪张图 / 哪个账号 |
+| `{变量名}` | 节点 `key`（接线或手填） | cache 节点 / 变量中枢 | 最终业务键 —— **变量名就是身份**：没有「前缀」段，同名不同结构靠类型与节点私有段区分 |
+| `index` | 硬编码（`variables/keys.py`） | 变量中枢 | **用途段**：用户目录（每个归属者一个 hash，登记「完整变量键 → 变量类型」） |
+| `{节点私有段}` | 节点自己定（ds-list 用 `counts`） | 节点 | 挂在某个变量本体之后（`{变量名}:counts`），中枢不认识也不碰 |
 
 拼出来的完整键：
 
@@ -132,6 +135,7 @@ await cache.start()
 tickneko:auth:token:{token_hash}           会话系统：令牌 → 用户（值形如 "id|ttl"）
 tickneko:workflow:graph:{图 id}:{变量名}    工作流：图级变量
 tickneko:workflow:acct:{账号 id}:{变量名}   工作流：账号级变量
+tickneko:workflow:index:acct:{归属 id}      变量中枢：用户目录（hash：变量键 → 类型）
 ```
 
 - 最前面那段 `tickneko` 是**配置**不是写死的：`namespace` 一改，整套键跟着换，两套部署
@@ -141,10 +145,12 @@ tickneko:workflow:acct:{账号 id}:{变量名}   工作流：账号级变量
 - 各系统往核心层传的键**不含**最前面那段命名空间（核心层 `_full` 自动拼上、`_strip` 摘掉，
   见上文「命名空间」）—— 上表 `auth:...` / `workflow:...` 之后的部分，就是各系统实际传给
   `cache.get` / `cache.set` 的键；
-- **键名与账号 id 不允许带冒号**：冒号是分段符，带进去会把键从中间劈开、造成歧义。工作流
-  侧由 cache 节点拦（`key` 手填 / 接线 / 账号级归属 id 都当场报错）；账号 id 正常是
-  `u-<账号>`，账号注册的字符集白名单（`user/validation.py`，`^[A-Za-z0-9_.-]+$`）本身就不含
-  冒号 —— 源头 + 缓存关口双保险。
+- **键的构造只有一处**：变量键由 `tickneko/variables/keys.py` 拼（节点不再自己拼字符串），
+  段名与顺序的完整口径见 [变量文档](../variables/variables.md)；
+- **变量名与账号 id 不允许带冒号**：冒号是分段符，带进去会把键从中间劈开、造成歧义。工作流
+  侧由 cache 节点与 `VariableKey` 拦（`key` 手填 / 接线 / 账号级归属 id 都当场报错）；账号 id
+  正常是 `u-<账号>`，账号注册的字符集白名单（`user/validation.py`，`^[A-Za-z0-9_.-]+$`）本身
+  就不含冒号 —— 源头 + 枢纽关口双保险。
 
 ---
 
@@ -160,7 +166,7 @@ tickneko:workflow:acct:{账号 id}:{变量名}   工作流：账号级变量
 | 层 | 谁 | 管什么 |
 | --- | --- | --- |
 | 核心层 | `tickneko.core.cache`（本文件上文） | 键值存取设施：换后端、TTL、批量、命名空间 |
-| 节点层 | `cache` 节点（`nodes/cache.py`） | **键长什么样**（前缀 + 作用域）、get / set 语义、给用户的口径 |
+| 节点层 | `cache` 节点（`nodes/cache.py`） | **用哪个作用域与变量名**、get / set 语义、给用户的口径（键由变量中枢拼） |
 
 节点层只依赖核心层**门面**（`ctx.cache`，鸭子形状 `async get(key)` / `async set(key, value)`），
 不感知后端差异。节点层往核心层传的键名**不带 Redis 命名空间前缀**——那层前缀是 Redis 后端
@@ -175,13 +181,13 @@ tickneko:workflow:acct:{账号 id}:{变量名}   工作流：账号级变量
 
 「入口」= 字段名与端口 id 同名：**线上的值优先，没接线才用 config 手填**（`input_value` 口径）。
 
-### 键前缀：作用域 → 键
+### 作用域 → 键
 
-节点层用一个前缀区分作用域，同一个缓存里互不打扰：
+节点层只用**作用域**区分「谁看得见」，名称就是变量名（没有前缀段），同一个缓存里互不打扰：
 
 ```
 workflow    workflow:graph:{图 id}:{变量名}     例  workflow:graph:3ab9c2…:计数
-account     workflow:acct:{账号 id}:{变量名}    例  workflow:acct:u-admin:日签开关
+account     workflow:acct:{账号 id}:{变量名}    例  workflow:acct:u-admin:日签
 ```
 
 - **图级**：挂在 `ctx.workflow_id` 下。离线跑 / 测试直接构造 ctx 时它是
@@ -189,6 +195,9 @@ account     workflow:acct:{账号 id}:{变量名}    例  workflow:acct:u-admin:
 - **账号级**：挂在 `ctx.owner_id` 下（`owner_id` 是工作流的主人，见 `workflow.md` 的
   `NodeExecutionContext`）。没有归属（离线跑、定时触发）就**当场抛 `ValueError`**：
   不知道是谁的缓存不能瞎写，提示改用 `workflow` 作用域；
+- 写变量走**唯一写入口** `ctx.write_variable`（= 类型守卫 → 写本体 → 报到）：目录里登记
+  「这条键是 cache 类型的变量」、属性表落 `read_only`（只在首次登记时落），类型冲突在改坏
+  本体之前就被拦下，所以变量列表不用扫库也能列出来；
 - 落在 Redis 上的完整键再拼上命名空间段（各段取值与用途的完整拆解见上文「键前缀分配」）。
 
 ### 口径（为什么这么定）
@@ -198,7 +207,7 @@ account     workflow:acct:{账号 id}:{变量名}    例  workflow:acct:u-admin:
 - **`get` 没取到不算事故**：键还没存过就送 `default`（没填就是空串），流程继续——「第一趟
   还没存过也能往下走」是常见用法（配 `default` 当初值，见小抄）；
 - **`set` 空值 = 清成空串**：清空是合法操作，不是错误；
-- **`key` 必填**：入口没接线、config 也没填，当场抛（同 `http.url`：不知道操作哪个键）；
+- **`key` 必填**：它就是**变量名**（入口没接线、config 也没填，当场抛；同 `http.url`：不知道操作哪个键）；
 - **键名不允许冒号**：`key` 手填、接线、账号级归属 id 带冒号都当场拦 —— 冒号是键的
   分段分隔符，带进去会把键从中间劈开（账号 id 正常是 `u-<账号>`，源头字符集已排除）；
 - **缓存后端不可用会抛 `CacheError`**（没 `start()` / Redis 掉了且没降级）：环境问题不吞不掩。
