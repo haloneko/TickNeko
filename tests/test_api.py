@@ -64,10 +64,10 @@ from tickneko.core.logger import (  # noqa: E402
     LogCore,
     LogRecord,
     LogSearchResult,
+    SqlLogStore,
     configure,
     manager,
 )
-from tickneko.db import SqlLogStore  # noqa: E402
 from tickneko.wiring import wire_loggers  # noqa: E402
 
 #: 演示账号（见 tickneko.api.services.user.demo.DEMO_USERS）

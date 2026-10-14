@@ -2,8 +2,8 @@
 
 本机**不碰数据库**：建表、写入、检索都在注入的
 :class:`~tickneko.core.logger.interfaces.LogStore` 后面（默认实现是
-:class:`~tickneko.db.SqlLogStore`：SQLModel 声明表 + AsyncSession 读写），日志层因此只依赖
-一个协议，不依赖任何具体库，也不在手写 SQL。处理机自己只管攒批、调用与容错隔离。
+:class:`~tickneko.core.logger.store.SqlLogStore`：SQLModel 声明表 + AsyncSession 读写），
+日志层因此只依赖一个协议，不依赖任何具体库，也不在手写 SQL。处理机自己只管攒批、调用与容错隔离。
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ class DatabaseLogProcessor(BaseLogProcessor):
     ) -> None:
         """
         :param store: 日志存储，协议见 :class:`~tickneko.core.logger.interfaces.LogStore`，
-            默认实现是 :class:`~tickneko.db.SqlLogStore`；表结构、连接、事务都归它管；
+            默认实现是 :class:`~tickneko.core.logger.store.SqlLogStore`；表结构、连接、事务都归它管；
         :param name: 处理机名称，默认 ``"database"``；同时挂多个库出口时
             （例如两个不同库）必须各自命名，名称即唯一标识。
         """

@@ -40,8 +40,12 @@ await logger.stop()                     # 停机自动冲刷余量
 ```python
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tickneko.core.logger import DatabaseLogProcessor, LogCore, LocalFileLogProcessor
-from tickneko.db import SqlLogStore
+from tickneko.core.logger import (
+    DatabaseLogProcessor,
+    LogCore,
+    LocalFileLogProcessor,
+    SqlLogStore,
+)
 
 logger = LogCore()                          # 最小化启动：只有控制台
 await logger.start()

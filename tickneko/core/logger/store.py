@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from sqlmodel import Field, SQLModel, col, delete, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from tickneko.core.logger.models import (
+from .models import (
     LogLevel,
     LogRecord,
     LogSearchResult,
