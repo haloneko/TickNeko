@@ -175,7 +175,7 @@ export default function VariableValueViewer({
   const jsonTypeRef = useRef<JsonEditorHandle>(null)
   const jsonViewRef = useRef<JsonEditorHandle>(null)
 
-  function applySnapshot(snapshot: VariableEntry) {
+  function applySnapshot(snapshot: VariableEntry, keepView = false) {
     setCurrent(snapshot)
     setText(
       snapshot.type === 'str' && typeof snapshot.data === 'string'
@@ -195,11 +195,12 @@ export default function VariableValueViewer({
     )
     setNewValue(emptyValue())
     setNewField('')
-    setViewMode('form')
-    setJsonText('')
-    setJsonError('')
     setFilter('')
     setDirty(false)
+    setJsonError('')
+    if (keepView) return
+    setViewMode('form')
+    setJsonText('')
   }
 
   async function load() {
@@ -245,7 +246,7 @@ export default function VariableValueViewer({
           return
         }
       }
-      applySnapshot(latest)
+      applySnapshot(latest, true) // 保存后停在当前视图：JSON 标签不会被切回表单
       setNotice('已保存')
       onChanged()
     } catch (err) {
@@ -418,7 +419,13 @@ export default function VariableValueViewer({
                 </button>
               )}
               {current.editable && (
-                <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  title="保存（Ctrl/Cmd+S）"
+                  onClick={save}
+                >
                   {busy ? '提交中…' : '保存'}
                 </button>
               )}
@@ -444,6 +451,8 @@ export default function VariableValueViewer({
               )}
             </>
           }
+          // Ctrl/Cmd+S 直接保存；只读变量不给快捷键，别把浏览器「保存网页」拦了却没动作
+          onSave={current.editable ? save : undefined}
           busy={busy}
           onClose={() => {
             if (dirty && current.editable) setPendingClose(true)

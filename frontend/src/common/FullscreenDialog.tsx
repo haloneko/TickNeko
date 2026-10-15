@@ -4,7 +4,8 @@
  *
  * 与 Modal 的区别：占满整屏而非居中浮层；顶栏中间留了 tabs 槽位放
  * 「表单 / JSON」这类视图切换；底部 status 展示错误、草稿等状态。
- * Esc 关闭、busy 时锁关，行为与 Modal 一致。
+ * Esc 关闭；传 onSave 时按 Ctrl/Cmd+S 直接保存（并拦下浏览器的「保存网页」）；
+ * busy 时锁关，关闭行为与 Modal 一致。
  *
  */
 import { useEffect, type ReactNode } from 'react'
@@ -21,8 +22,9 @@ export interface FullscreenDialogProps {
   children: ReactNode
   /** 底部状态栏内容（错误、草稿标记、类型信息等），不需要则不渲染状态栏 */
   status?: ReactNode
-  /** 请求进行中：Esc 不关、关闭按钮禁用 */
+
   busy?: boolean
+  onSave?: () => void
   onClose: () => void
 }
 
@@ -33,16 +35,26 @@ export function FullscreenDialog({
   children,
   status,
   busy = false,
+  onSave,
   onClose,
 }: FullscreenDialogProps) {
-  // Esc 关闭（处理中不关），与 Modal / ConfirmDialog 行为一致
+  // Esc 关闭（处理中不关），与 Modal / ConfirmDialog 行为一致；Ctrl/Cmd+S 交给 onSave，
+  // 必须先 preventDefault，否则浏览器会抢先弹出「保存网页」对话框。
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !busy) onClose()
+      if (event.key === 'Escape') {
+        if (!busy) onClose()
+        return
+      }
+      if (!onSave) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        if (!busy && !event.repeat) onSave()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [busy, onClose])
+  }, [busy, onClose, onSave])
 
   // 全屏层占满视口，但固定定位盖不住窗口滚动条：背景页仍能滚，滚动条会一直留在
   // 最右侧，与内容区自己的滚动条并排，看起来像「两个滑动条」。打开期间锁住文档滚动
