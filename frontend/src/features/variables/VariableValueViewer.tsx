@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 import { FullscreenDialog } from '../../common/FullscreenDialog'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { JsonEditor, type JsonEditorHandle } from '../../common/JsonEditor'
-import { IconCheck, IconCopy, IconEdit, IconTrash } from '../../common/icons'
+import { IconCheck, IconCopy, IconEdit, IconPlus, IconTrash } from '../../common/icons'
 import { ApiRequestError } from '../../lib/http'
 import {
   addVariable,
@@ -159,8 +159,6 @@ export default function VariableValueViewer({
   const [text, setText] = useState('')
   const [items, setItems] = useState<ValueDraft[]>([])
   const [fields, setFields] = useState<FieldDraft[]>([])
-  const [newValue, setNewValue] = useState<ValueDraft>(emptyValue)
-  const [newField, setNewField] = useState('')
   // 双视图：list / dict 可在「逐项表单」与「整体 JSON」间切换，保存以最后编辑的视图为准
   const [viewMode, setViewMode] = useState<'form' | 'json'>('form')
   const [jsonText, setJsonText] = useState('')
@@ -171,6 +169,8 @@ export default function VariableValueViewer({
   const [filter, setFilter] = useState('')
   // dict 行默认只读展示，点「修改」才让这一行变成输入框（点「完成」退出）
   const [editingRow, setEditingRow] = useState<number | null>(null)
+  // 刚新增的那一行：挂载后自动聚焦它的输入框（autoFocus 只在挂载时生效）
+  const [focusRow, setFocusRow] = useState<number | null>(null)
   // CodeMirror 实例句柄：json 类型与 list/dict JSON 视图各一个，用于格式化
   const jsonTypeRef = useRef<JsonEditorHandle>(null)
   const jsonViewRef = useRef<JsonEditorHandle>(null)
@@ -193,10 +193,9 @@ export default function VariableValueViewer({
           }))
         : [],
     )
-    setNewValue(emptyValue())
-    setNewField('')
     setFilter('')
     setEditingRow(null)
+    setFocusRow(null)
     setDirty(false)
     setJsonError('')
     if (keepView) return
@@ -326,25 +325,29 @@ export default function VariableValueViewer({
       : all
   }, [filter, fields])
 
-  /** 新增元素 / 字段先进本地草稿，随保存一次全量提交（后端 `items`/`fields` 覆盖语义不变）。 */
+  /** 新增：直接在表格末尾追加一行空草稿，并把焦点落到新行。
+   *
+   * list 追加空值（表格里直接改）；dict 追加空键空值并进入编辑态。随保存一次全量提交
+   * （后端 `items`/`fields` 覆盖语义不变）。 */
   function add() {
-    try {
-      const value = parseValue(newValue)
-      if (current.type === 'list') {
-        setItems((values) => [...values, draftValue(value)])
-      } else {
-        if (!newField) throw new Error('字段名不能为空')
-        if (fields.some((field) => field.field === newField)) {
-          throw new Error(`字段名重复：${newField}`)
-        }
-        setFields((values) => [...values, { field: newField, value: draftValue(value) }])
-      }
-      setNewValue(emptyValue())
-      setNewField('')
-      edited()
-    } catch (err) {
-      setError(errorMessage(err))
+    if (current.type === 'list') {
+      setFocusRow(items.length)
+      setItems((values) => [...values, emptyValue()])
+    } else {
+      setFocusRow(fields.length)
+      setEditingRow(fields.length)
+      setFields((values) => [...values, { field: '', value: emptyValue() }])
     }
+    setFilter('') // 有过滤时新行会被藏起来，这里清掉过滤让新行可见
+    edited()
+  }
+
+  /** 清空整份集合的草稿（保存后才真正落库）。 */
+  function clearCollection() {
+    if (current.type === 'list') setItems([])
+    else setFields([])
+    setEditingRow(null)
+    edited()
   }
 
   function edited() {
@@ -533,7 +536,7 @@ export default function VariableValueViewer({
               {viewMode === 'form' && (current.type === 'list' || current.type === 'dict') && (
                 <div className={styles.toolbar}>
                   <input
-                    className={styles.control}
+                    className={`${styles.control} ${styles.filter}`}
                     type="search"
                     placeholder={current.type === 'list' ? '过滤元素…' : '过滤字段名或值…'}
                     aria-label="过滤"
@@ -546,6 +549,14 @@ export default function VariableValueViewer({
                       {current.type === 'list' ? items.length : fields.length} 项
                     </span>
                   )}
+                  <button type="button" className="btn" onClick={add}>
+                    <IconPlus size={14} />
+                    新增
+                  </button>
+                  <button type="button" className="btn" onClick={clearCollection}>
+                    <IconTrash size={14} />
+                    清空
+                  </button>
                 </div>
               )}
               {current.type === 'list' && viewMode === 'form' && (
@@ -571,6 +582,7 @@ export default function VariableValueViewer({
                               <input
                                 className={styles.control}
                                 aria-label={`第 ${index + 1} 项`}
+                                autoFocus={index === focusRow}
                                 value={item.text}
                                 onChange={(event) => {
                                   const next = event.target.value
@@ -611,19 +623,6 @@ export default function VariableValueViewer({
                       </tbody>
                     </table>
                   )}
-                  <div className={styles.toolbar}>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        setItems([])
-                        edited()
-                      }}
-                    >
-                      清空列表
-                    </button>
-                    <span className={styles.hint}>保存当前完整列表，保留顺序和重复项</span>
-                  </div>
                 </>
               )}
               {current.type === 'dict' && viewMode === 'form' && (
@@ -653,6 +652,7 @@ export default function VariableValueViewer({
                                   <input
                                     className={styles.control}
                                     aria-label={`字段 ${index + 1} 的名称`}
+                                    autoFocus={index === focusRow}
                                     value={field.field}
                                     onChange={(event) => {
                                       const name = event.target.value
@@ -737,49 +737,7 @@ export default function VariableValueViewer({
                       </tbody>
                     </table>
                   )}
-                  <div className={styles.toolbar}>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        setFields([])
-                        setEditingRow(null)
-                        edited()
-                      }}
-                    >
-                      清空字典
-                    </button>
-                    <span className={styles.hint}>保存所有字段，删除的字段会一并生效</span>
-                  </div>
                 </>
-              )}
-              {viewMode === 'form' && (current.type === 'list' || current.type === 'dict') && (
-                <div className={styles.newItem}>
-                  <strong>{current.type === 'list' ? '新增元素' : '新增或修改字段'}</strong>
-                  {current.type === 'dict' && (
-                    <input
-                      className={styles.control}
-                      aria-label="新增字段名"
-                      placeholder="字段名"
-                      value={newField}
-                      onChange={(event) => setNewField(event.target.value)}
-                    />
-                  )}
-                  <input
-                    className={styles.control}
-                    aria-label="新增值"
-                    placeholder="值"
-                    value={newValue.text}
-                    onChange={(event) =>
-                      setNewValue((value) => ({ ...value, text: event.target.value }))
-                    }
-                  />
-                  <div className={styles.toolbar}>
-                    <button type="button" className="btn" onClick={add}>
-                      新增
-                    </button>
-                  </div>
-                </div>
               )}
             </fieldset>
           )}
