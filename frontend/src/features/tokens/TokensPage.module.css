@@ -198,6 +198,13 @@
   justify-content: space-between;
   gap: 8px;
 }
+/* 卡片顶部左侧：归属昵称 + 平台徽标排一行 */
+.cardTopLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .cardBody {
   display: flex;
   flex-direction: column;

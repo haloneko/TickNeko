@@ -235,7 +235,16 @@ export default function TokensPage() {
               return (
                 <div key={t.id} className={styles.card}>
                   <div className={styles.cardTop}>
-                    <span className="chip">{t.nickname || t.id}</span>
+                    <div className={styles.cardTopLeft}>
+                      {/* 底层适配器原样亮在卡片上：platform 值是啥就显示啥，加新平台不用改这里 */}
+                      <span
+                        className={`chip ${t.platform}`}
+                        title={`适配器：${t.platform}`}
+                      >
+                        {t.platform}
+                      </span>
+                      <span className="chip">{t.nickname || t.id}</span>
+                    </div>
                     <div className={styles.statusRow}>
                       <span
                         className={`${styles.dot} ${t.online ? styles.dotOn : styles.dotOff}`}
