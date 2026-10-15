@@ -9,17 +9,17 @@
 | 文件 | 职责 |
 |---|---|
 | `tickneko/variables/keys.py` | **键布局的唯一实现处**：`VariableKey`（本体 / 属性表 / 节点私有段） |
-| `tickneko/variables/viewer.py` | `VariableContext`、`VariableRule`、`VariableView`、`VariableViewer` 契约与类型注册表 |
-| `tickneko/variables/viewers.py` | 显式注册的 str / json / list / dict 基础查看器 |
+| `tickneko/variables/viewer.py` | `VariableContext`、`VariableRule`、`VariableView`、`VariableViewer` 契约与类型注册表（「认识的类型」与「有节点维护的类型」两份名单） |
+| `tickneko/variables/viewers.py` | 显式注册的 str / json / list / dict 基础查看器（基类与兜底探测，没有节点声明它们） |
 | `tickneko/variables/center.py` | `VariableCenter`：用户目录、属性表、**唯一写入口** `write_variable`（守卫→写→报到）、类型墓碑（弹空≠删除）、显式 `drop` 注销 |
 | `tickneko/workflow/nodes/base.py` | `NodeSpec.variable_viewer`（默认 `None`）；`ctx.variable()` / `ctx.write_variable()`（内置写节点统一走它） |
 | `tickneko/workflow/nodes/registry.py` | 三种节点注册入口均收集查看器；同类去重、类型 id 去重，顺序确定 |
 | `tickneko/workflow/nodes/cache.py` | `CacheViewer`，匹配 cache 的 `set` 动作 |
 | `tickneko/workflow/nodes/ds_dict.py` | `DsDictViewer`，字典文本编码与完整覆盖 |
 | `tickneko/workflow/nodes/ds_container.py` | `DsListViewer` 与运行时共用的本体 / 频次联动 |
-| `tickneko/api/services/variables/service.py` | 逻辑变量发现、图来源反查、登记类型 / 探测与查看器选择 |
+| `tickneko/api/services/variables/service.py` | 逻辑变量发现、图来源反查、登记类型 / 探测与查看器选择、按类型新建 |
 | `tickneko/api/api/variables/router.py`、`responses.py` | HTTP 入口、错误转换与通用响应壳 |
-| `frontend/src/features/variables/` | 类型渲染、编辑草稿、新增 / 保存与重新读取 |
+| `frontend/src/features/variables/` | 类型渲染、编辑草稿、新建变量弹窗、元素新增 / 保存与重新读取 |
 
 调用链：`VariablesPage → VariableValueViewer → variablesApi → router → VariableService →
 节点注册的查看器 → 节点拥有的存储实现`。工作流层不 import FastAPI，中枢不认识工作流模型
@@ -31,6 +31,14 @@
 `variable_viewer=SomeViewer`，并顺带把它的 `type_id` 登记进类型注册表（一个 `type_id`
 只能属于一个类）。查看器定义 `type_id`、`label`、`rules`、`priority`、`match(context)`、
 只读的 `probe(context)`、`view()` 和 `add(self, /, **params)`。
+
+类型注册表分两份名单，用途不同：
+
+* `registered_variable_viewers()`：**本进程认识**的全部类型（含 `str / json / list / dict`
+  这几个只作基类与兜底的基础类型）—— 用来**解读**已有变量（探测、按登记类型查看）；
+* `node_variable_viewers()`：**有节点在维护**的类型 —— 节点**带执行器**注册时随查看器一起
+  登记（`register_executor` / `register_node`）；只 `declare_node_type` 占位、执行器还没写的
+  类型不算。用来**开新变量**（见第 4 节「新建」）：没人写的类型建出来也没人动。
 
 上下文只由服务端创建：包含缓存连接、中枢、作用域、真实归属、图 id、逻辑名称、来源节点，
 以及**用户目录里登记的变量类型** `type_id`。物理键由可信身份计算，请求体里的
@@ -126,16 +134,37 @@ field 就是完整变量键、value 是**变量类型**（写它的节点注册�
 | 方法 / 路径 | 作用 |
 |---|---|
 | `GET /api/variables` | 原有 `owner_id / scope / query / limit / offset` 查询与分页；只列**元数据**，不读本体值 |
+| `GET /api/variables/types` | 可手工新建的变量类型清单（**有节点在维护**、且能直接编辑的那些） |
+| `POST /api/variables` | 新建一个逻辑变量：只登记类型，本体先空着 |
 | `GET /api/variables/value` | 查看一个逻辑变量（完整字段） |
-| `POST /api/variables/add` | 新增或保存，整份 JSON 对象交给查看器 |
+| `POST /api/variables/add` | 保存（写值），整份 JSON 对象交给查看器 |
 | `DELETE /api/variables` | 删除一个逻辑变量（本体与键族辅助键一并清掉，不可恢复） |
 
-后三个接口通过 query 定位：图级传 `scope=graph&workflow_id=...&key=...`；
-账号级传 `scope=account&owner_id=...&key=...`，省略账号归属时取当前用户。
+**新建**（`POST /variables`，多一个 `type_id`）给变量补上「从无到有」这一步，可建的类型只有
+一份名单（`GET /variables/types` 与创建接口共用同一份判据），两条缺一不可：
+
+* **有节点在维护**（`node_variable_viewers()`）：写变量的是节点，没人写的类型是空壳；
+* 查看器允许改写（`probe_editable`）：建完得能直接编辑。
+
+于是现行的可建类型就是三类节点的三种：`cache`（缓存）/ `ds-dict`（键值对）/ `ds-list`
+（列表·计数）。基础类型 `str / json / dict` 没有任何节点声明（`viewers.py` 里只作基类与兜底
+探测），通用 `list` 缺来源时不敢猜结构、只读 —— 它们都不在名单里，硬传 `type_id` 会被
+409「不支持手工新建」挡下（有节点注册了同名查看器后，类型自己就会出现在界面上，不用改代码）。
+顺手提一句：基础类型若真建出来还会**占住变量名** —— 同名节点写入会撞类型守卫（409）。
+**变量名即身份**：这个名字已经有本体、已经登记过类型、或已被图里的节点声明（来源规则命中）
+一律 409，不覆盖也不改名；没注册的 `type_id` 是 422；图级还给不出真实归属（图不存在）时 404。
+登记走中枢的 `remember`（目录 + 属性表），**本体不写**：新建出来的是空变量 —— 本体不占存储键，
+但登记在，列表照常列出、`/value` 按登记类型返回空值（不 404），随后用 `/add` 照常写值。
+与「类型墓碑」是同一个状态：登记跟着变量身份走，要换类型先删除。
+
+这些接口都通过 query 定位（新建多一个 `type_id`）：图级传
+`scope=graph&workflow_id=...&key=...`；账号级传 `scope=account&owner_id=...&key=...`，
+省略账号归属时取当前用户。
 `key` 必填，就是变量名。图归属从工作流存储查，调用方不能指定或伪造。管理员可操作
 所有归属与已删图的孤儿变量，普通用户只能操作自己的。
 
-删除与修改同一权限口径（没登录 401、普通用户碰别人的 403、本体不存在 404）。删除按
+新建与删除 / 修改同一权限口径（没登录 401、普通用户碰别人的 403、图不存在 404）。
+删除按
 `{本体}:*` 收掉这一个变量自己的整族键（本体 + 属性表 + 节点私有段）并**注销目录登记**——
 这是唯一让变量类型消失的入口（弹空 / 清空只留墓碑），不残留内部数据；不影响其它变量，
 图 / 节点下次运行会重新写入同名变量。
@@ -225,10 +254,16 @@ DsListViewer 新增会先按本体重建全部频次，运行时 push / pop / co
 保存成功后**停在当前视图**（表单 / JSON 不跳转），重新调用 view 刷新真实值和长度，随后刷新列表。
 只读变量只有查看入口。
 
+列表页头部的「新增变量」弹窗建的是**空变量**：填名字、选类型（下拉由 `GET /variables/types` 下发，
+前端不抄一份），作用域选账号级（归自己）或图级（再选一张图，图来自工作流列表）。值不在这里填 ——
+建好后列表里点「编辑」写；弹窗里的失败（同名 409、类型不可建 409、没登录 401）原样显示服务端文案并
+保留表单现场。
+
 回归测试在 `tests/test_variable_viewers.py`、`tests/test_variables.py`、`tests/test_ds_nodes.py`：
 覆盖注册兼容与去重（含 `type_id` 唯一）、来源规则、账号级 / 已删图 / 失效节点探测、
 登记类型优先、规则冲突、辅助键缺失、逻辑枚举与分页（含目录登记与类型展示）、重复 / 空元素计数、
-旧 idx 按需重建、完整覆盖、清空、删除（含键族清理、权限、孤儿变量、404）、权限、422、
+旧 idx 按需重建、完整覆盖、清空、删除（含键族清理、权限、孤儿变量、404）、
+新建（类型清单、登记类型、空值不 404、同名 / 只读类型 / 缺图、权限）、权限、422、
 **类型墓碑（弹空 / 清空 ≠ 删除，drop 才注销）**、**read_only 只在首次登记时落定**及部分
 存储失败。
 Redis 集成用例使用含冒号的独立 namespace，验证真实 HDEL 删空行为；本机无 Redis 时跳过，
