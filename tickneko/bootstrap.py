@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
 from contextlib import suppress
 
 import uvicorn
@@ -32,9 +32,9 @@ from .api import (
 )
 from .bots import SqlBotStore
 from .core.cache import CacheOptions, cache
-from .core.logger import BaseLogger, default_core, manager
+from .core.logger import LoggerLike, default_core, manager
 from .core.scheduler import scheduler
-from .platforms.bridge import Gateway, PlatformEvent
+from .platforms.bridge import EventSubscriber, Gateway, PlatformEvent
 from .platforms.bridge.kook import KookAdapter
 from .platforms.bridge.manager import BotManager
 from .platforms.bridge.onebot import OneBotAdapter
@@ -77,7 +77,7 @@ class _NoSignalServer(uvicorn.Server):
 
 # --------------------------------------------------------------------------- 落库
 async def _prepare_stores(
-    db: AsyncEngine, log: BaseLogger
+    db: AsyncEngine, log: LoggerLike
 ) -> tuple[SqlBotStore, SqlUserStore, SqlSessionStore, SqlWorkflowStore]:
     """建表 + 种演示账号（幂等）：各份落库存储都挂同一个 ``db``。
 
@@ -116,22 +116,24 @@ async def on_platform_event(event: PlatformEvent) -> None:
     平台差异由适配器翻译掉了，要发消息走 ``gateway.send(platform, owner_id, action, ...)``。
     审计日志由 ``Gateway.publish`` 统一记，这里只做分发。
     """
-    router = _router_for(event.kind)
-    if router is None:
+    routed = _router_for(event.kind)
+    if routed is None:
         # meta（连接生命周期 / 心跳）与业务无关，静默（审计日志 Gateway 已记）；
         # 路由还没装配（启动早期）也是 None —— 防御性放过
         return
-    await _dispatch(router, event)
+    router, is_event = routed
+    await _dispatch(router, event, is_event=is_event)
 
 
-def _router_for(kind: str) -> MessageRouter | EventRouter | None:
-    """事件大类 -> 路由：``message`` 走消息路由、``notice`` / ``request`` 走事件路由，
-    其余（``meta`` / 路由未装配）返回 ``None`` 静默放过。
+def _router_for(kind: str) -> tuple[MessageRouter | EventRouter, bool] | None:
+    """事件大类 -> (路由, 是否事件路由)：``message`` 走消息路由，``notice`` / ``request``
+    走事件路由（事件路由带「无事件类型就忽略」的过滤）；其余（``meta`` / 路由未装配）
+    返回 ``None`` 静默放过。
     """
-    if kind == "message":
-        return _message_router
-    if kind in ("notice", "request"):
-        return _event_router
+    if kind == "message" and _message_router is not None:
+        return _message_router, False
+    if kind in ("notice", "request") and _event_router is not None:
+        return _event_router, True
     return None
 
 
@@ -155,14 +157,19 @@ def _trigger_data(event: PlatformEvent) -> dict[str, object]:
     }
 
 
-async def _dispatch(router: MessageRouter | EventRouter, event: PlatformEvent) -> None:
+async def _dispatch(
+    router: MessageRouter | EventRouter,
+    event: PlatformEvent,
+    *,
+    is_event: bool,
+) -> None:
     """把一条事件送进对应路由：拆数据 -> 分发，消息 / 事件共用一个执行口。
 
-    事件路由多一道过滤：没有事件类型的事件静默丢掉，别让「订阅任何事件（*）」的图被拉起。
-    单个坏事件只记日志、不拖垮整条链路。
+    事件路由多一道过滤（``is_event``）：没有事件类型的事件静默丢掉，别让「订阅任何
+    事件（*）」的图被拉起。单个坏事件只记日志、不拖垮整条链路。
     """
     log = default_core().child("bridge")
-    if isinstance(router, EventRouter) and not event.event_type:
+    if is_event and not event.event_type:
         log.debug("收到没有事件类型的事件，已忽略", platform=event.platform, kind=event.kind)
         return
     try:
@@ -200,7 +207,7 @@ async def run(
         （``data/secret_key``，见 ``config.load_or_create_secret_key``）；
     :param cache_config: ``[cache]`` 那块配置，交给 ``CacheOptions.from_mapping``。
     """
-    global _api_server, _api_task, _db_engine, _gateway, _onebot_adapter, _kook_adapter
+    global _db_engine, _gateway, _onebot_adapter, _kook_adapter
     global _message_router, _event_router
     _db_engine = engine
     log = default_core().child("bootstrap")
@@ -227,35 +234,11 @@ async def run(
     )
     _gateway.register(_onebot_adapter)
 
-    # Kook 适配器（正向 WS 客户端，**多客户端**）：**一个**适配器管多个机器人
-    # （dict[bot_id, client]），Gateway 里 Kook 只占一个 platform 槽位，之后经 /api/bots
-    # 增删 Kook 机器人也不会撞「同平台重复注册」的限制。凭证行来自 bot_credentials
-    # （platform=kook 且启用），Bot Token 用 [kook].secret_key 从 token_secret 解密出来逐个
-    # ``add_bot``；网关地址由客户端连接前自己 discover（配置文件里不填）。
-    # 有 secret_key 就算「接入了 Kook」，适配器照建（哪怕此刻一个机器人都没有）—— 这样之后
-    # 经接口新增 Kook 机器人能立刻拉起连接。留空时入口已经自动生成/读取一份（data/secret_key），
-    # 所以正常总有值；真为空（比如不走入口的测试）就一个 Kook 适配器都不建。
+    # Kook 适配器（正向 WS 客户端）：一个适配器管多个机器人（凭证行逐个解密登记，
+    # 见 _setup_kook）；没配 secret_key 就不接入（入口正常启动时已自动生成一份）
     kook_options = KookOptions.from_mapping(kook) if kook is not None else KookOptions()
-    secret_key: str = kook_options.secret_key
-    _kook_adapter = None
-    if secret_key:
-        _kook_adapter = KookAdapter(kook_options, publish=_gateway.publish)
-        kook_credentials = await tokens.list_platform("kook", enabled_only=True)
-        for cred in kook_credentials:
-            try:
-                bot_token = await tokens.decrypt_token(cred.bot_id, secret_key)
-            except ValueError as exc:
-                # 有密文但解不开：几乎都是 secret_key 配错——明说，别让用户只看到「机器人起不来」
-                log.error(
-                    "Kook 凭证行解不开（secret_key 不对或密文损坏），跳过登记",
-                    bot_id=cred.bot_id,
-                    error=str(exc) or repr(exc),
-                )
-                continue
-            if not bot_token:
-                log.warning("Kook 凭证行没有密文，跳过登记", bot_id=cred.bot_id)
-                continue
-            _kook_adapter.add_bot(cred.bot_id, bot_token, owner_id=cred.owner_id)
+    _kook_adapter = await _setup_kook(kook_options, tokens, _gateway.publish, log)
+    if _kook_adapter is not None:
         _gateway.register(_kook_adapter)
 
     # 机器人管理服务：跨平台统一「增 / 启停 / 删」，凭证落库 + 适配器生命周期一起封在
@@ -264,66 +247,26 @@ async def run(
         tokens,
         onebot=_onebot_adapter,
         kook=_kook_adapter,
-        secret_key=secret_key,
+        secret_key=kook_options.secret_key,
     )
 
-    def _run_flow(workflow_id: str, version: int, **kw: object):
-        """「跑整条流程」的回调：消息 / 事件两条路由共用一份（闭包带上 store / scheduler / gateway）。
+    # 消息 / 事件两条路由 + 总线订阅（见 _setup_routers）
+    _message_router, _event_router = _setup_routers(workflows, _gateway)
 
-        两条路由都只认普通数据，跑到整条流程时才需要这些依赖 —— 消息触发与事件触发跑整条
-        流程那一趟都要能拿得到它们发动作。
-        """
-        return run_published_workflow(
-            workflow_id, version, workflows, scheduler, gateway=_gateway, **kw
-        )
-
-    # 消息路由：trigger=message 工作流的登记处 + 消息分发处。它不 import bridge，只认普通
-    # 数据；「跑整条流程」的回调在这里把 run_published_workflow 连同 store / scheduler 闭包
-    # 进来（消息触发跑整条流程那一趟也要能拿得到它们发动作）。
-    _message_router = MessageRouter()
-    _message_router.attach(_run_flow)
-
-    # 事件路由：trigger=event 工作流的登记处 + 事件（通知 / 请求）分发处。与消息路由同一副
-    # 形状（不 import bridge、只认普通数据），区别只在「按订阅的事件类型匹配」。
-    _event_router = EventRouter()
-    _event_router.attach(_run_flow)
-
-    _gateway.subscribe(on_platform_event)
-
-    # 接口层：建应用（注入同一个 db 上的三份存储 + OneBot 适配器）-> 起 uvicorn
-    options = ApiOptions.from_mapping(api)
-    _api_server = _NoSignalServer(
-        uvicorn.Config(
-            create_app(
-                options,
-                user_store=users,
-                session_store=sessions,
-                # 注入的是适配器（兼容面满足接口层的 OneBotLike 协议：roster / kick /
-                # revoke / tokens 都透传给被包的服务端），<prefix>/onebot/* 那组管理接口零改动
-                onebot=_onebot_adapter,
-                # 机器人管理服务（跨平台增 / 启停 / 删）：<prefix>/bots/* 那组接口用它
-                bots=bot_manager,
-                # 运行时触发器：拨工作流的运行开关时即时启停（不传是等下次启动才生效）；
-                # 带上平台总线：登记构造的到点闭包要能发动作
-                workflow_triggers=WorkflowTriggers(
-                    workflows,
-                    scheduler,
-                    gateway=_gateway,
-                    message_router=_message_router,
-                    event_router=_event_router,
-                ),
-                workflow_store=workflows,
-                # 缓存门面：<prefix>/variables（变量查看）拿它列工作流变量；传的就是本进程
-                # 正在用的那份单例（上面已 configure + start），读到的与业务是同一份数据
-                cache=cache,
-            ),
-            host=api_host,
-            port=api_port,
-            log_config=None,  # 不接管日志系统（接口层走 tickneko.core.logger）
-            access_log=False,  # 访问日志交给接口层自己的中间件
-        )
+    # 接口层：建应用 -> 起 uvicorn（见 _start_api）
+    _start_api(
+        api,
+        api_host,
+        api_port,
+        users=users,
+        sessions=sessions,
+        workflows=workflows,
+        onebot_adapter=_onebot_adapter,
+        bot_manager=bot_manager,
+        message_router=_message_router,
+        event_router=_event_router,
+        gateway=_gateway,
     )
-    _api_task = asyncio.create_task(_api_server.serve(), name="api")
 
     # 启动定时任务调度器：开始节点（trigger=time）靠它到点触发
     await scheduler.start()
@@ -338,6 +281,120 @@ async def run(
         message_router=_message_router,
         event_router=_event_router,
     )
+
+
+async def _setup_kook(
+    options: KookOptions,
+    tokens: SqlBotStore,
+    publish: EventSubscriber,
+    log: LoggerLike,
+) -> KookAdapter | None:
+    """Kook 适配器装配：一个适配器管多个机器人（凭证行逐个解密登记）；没配 secret_key 就不接入。"""
+    if not options.secret_key:
+        return None
+    adapter = KookAdapter(options, publish=publish)
+    credentials = await tokens.list_platform("kook", enabled_only=True)
+    for cred in credentials:
+        try:
+            bot_token = await tokens.decrypt_token(cred.bot_id, options.secret_key)
+        except ValueError as exc:
+            # 有密文但解不开：几乎都是 secret_key 配错——明说，别让用户只看到「机器人起不来」
+            log.error(
+                "Kook 凭证行解不开（secret_key 不对或密文损坏），跳过登记",
+                bot_id=cred.bot_id,
+                error=str(exc) or repr(exc),
+            )
+            continue
+        if not bot_token:
+            log.warning("Kook 凭证行没有密文，跳过登记", bot_id=cred.bot_id)
+            continue
+        adapter.add_bot(cred.bot_id, bot_token, owner_id=cred.owner_id)
+    return adapter
+
+
+def _setup_routers(
+    workflows: SqlWorkflowStore,
+    gateway: Gateway,
+) -> tuple[MessageRouter, EventRouter]:
+    """消息 / 事件两条路由 + 总线订阅：共用同一个「跑整条流程」的回调（见 ``_run_flow``），
+    路由只认普通数据、不 import bridge。
+    """
+    def _run_flow(
+        workflow_id: str,
+        version: int,
+        *,
+        trigger_data: Mapping[str, object] | None = None,
+        user_id: str = "",
+    ) -> Awaitable[None]:
+        """「跑整条流程」的回调：两条路由共用（闭包带上 store / scheduler / gateway，
+        跑整条流程那一趟要靠它们发动作）。"""
+        return run_published_workflow(
+            workflow_id,
+            version,
+            workflows,
+            scheduler,
+            trigger_data=trigger_data,
+            user_id=user_id,
+            gateway=gateway,
+        )
+
+    message_router = MessageRouter()  # trigger=message 工作流的登记处 + 消息分发处
+    message_router.attach(_run_flow)
+    event_router = EventRouter()  # trigger=event（通知 / 请求）的登记处 + 分发处
+    event_router.attach(_run_flow)
+    gateway.subscribe(on_platform_event)  # 总线事件从这里进业务
+    return message_router, event_router
+
+
+def _start_api(
+    api: Mapping[str, object],
+    api_host: str,
+    api_port: int,
+    *,
+    users: SqlUserStore,
+    sessions: SqlSessionStore,
+    workflows: SqlWorkflowStore,
+    onebot_adapter: OneBotAdapter,
+    bot_manager: BotManager,
+    message_router: MessageRouter,
+    event_router: EventRouter,
+    gateway: Gateway,
+) -> None:
+    """接口层：建应用（注入同一 db 上的三份存储 + OneBot 适配器）-> 起 uvicorn。"""
+    global _api_server, _api_task
+    options = ApiOptions.from_mapping(api)
+    _api_server = _NoSignalServer(
+        uvicorn.Config(
+            create_app(
+                options,
+                user_store=users,
+                session_store=sessions,
+                # 注入的是适配器（兼容面满足接口层的 OneBotLike 协议：roster / kick /
+                # revoke / tokens 都透传给被包的服务端），<prefix>/onebot/* 那组管理接口零改动
+                onebot=onebot_adapter,
+                # 机器人管理服务（跨平台增 / 启停 / 删）：<prefix>/bots/* 那组接口用它
+                bots=bot_manager,
+                # 运行时触发器：拨工作流的运行开关时即时启停（不传是等下次启动才生效）；
+                # 带上平台总线：登记构造的到点闭包要能发动作
+                workflow_triggers=WorkflowTriggers(
+                    workflows,
+                    scheduler,
+                    gateway=gateway,
+                    message_router=message_router,
+                    event_router=event_router,
+                ),
+                workflow_store=workflows,
+                # 缓存门面：<prefix>/variables（变量查看）拿它列工作流变量；传的就是本进程
+                # 正在用的那份单例（上面已 configure + start），读到的与业务是同一份数据
+                cache=cache,
+            ),
+            host=api_host,
+            port=api_port,
+            log_config=None,  # 不接管日志系统（接口层走 tickneko.core.logger）
+            access_log=False,  # 访问日志交给接口层自己的中间件
+        )
+    )
+    _api_task = asyncio.create_task(_api_server.serve(), name="api")
 
 
 async def serve_forever() -> None:
