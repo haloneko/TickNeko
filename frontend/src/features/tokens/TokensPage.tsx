@@ -81,6 +81,8 @@ export default function TokensPage() {
   const [failure, setFailure] = useState('')
   const [pending, setPending] = useState<Pending | null>(null)
   const [busy, setBusy] = useState(false)
+  /** 正在切换开关的机器人 id：只禁用那一张卡，别的卡照常可点 */
+  const [togglingId, setTogglingId] = useState<string | null>(null)
   /** 可选归属：筛选下拉用它（普通用户只会拿到自己那一条，下拉随之不显示） */
   const [owners, setOwners] = useState<Owner[]>([])
   /** 筛选中的归属 id；空串 = 全部 */
@@ -146,6 +148,21 @@ export default function TokensPage() {
   function confirmPending() {
     if (!pending) return
     void run(() => deleteBot(pending.id), '机器人已删除')
+  }
+
+  /** 开关切换只更新那一张卡，不整表刷新（PATCH 返回最新整条记录，就地替换）。 */
+  async function toggleEnabled(bot: Bot) {
+    const next = !bot.enabled
+    setTogglingId(bot.id)
+    try {
+      const { data } = await setBotEnabled(bot.id, next)
+      setTokens((prev) => prev.map((t) => (t.id === data.id ? data : t)))
+      pushToast('success', next ? '机器人已启用' : '机器人已停用，客户端已断开')
+    } catch (err) {
+      pushToast('error', describe(err))
+    } finally {
+      setTogglingId(null)
+    }
   }
 
   /** 弹窗正文里点名的对象：吊销的那张令牌（找不到就退回「这个令牌」）。 */
@@ -228,7 +245,7 @@ export default function TokensPage() {
                   <IconPlus size={22} />
                 </span>
                 <span className={styles.addCardTitle}>添加机器人</span>
-                <span className={styles.addCardHint}>签发访问令牌 · 明文只显示一次</span>
+
               </button>
             )}
             {tokens.map((t) => {
@@ -259,7 +276,7 @@ export default function TokensPage() {
                   </div>
                   <dl className={styles.cardBody}>
                     <div className={styles.cardField}>
-                      <dt>机器人账号</dt>
+                      <dt>机器人名称</dt>
                       <dd className={t.account ? undefined : styles.muted}>
                         {t.account || '—'}
                       </dd>
@@ -283,13 +300,8 @@ export default function TokensPage() {
                         aria-checked={t.enabled}
                         aria-label={t.enabled ? '停用令牌' : '启用令牌'}
                         className={`switch ${t.enabled ? 'switch-on' : ''}`}
-                        disabled={busy}
-                        onClick={() =>
-                          void run(
-                            () => setBotEnabled(t.id, !t.enabled),
-                            t.enabled ? '机器人已停用，客户端已断开' : '机器人已启用',
-                          )
-                        }
+                        disabled={togglingId === t.id}
+                        onClick={() => void toggleEnabled(t)}
                       >
                         <span className="switch-knob" />
                       </button>
@@ -368,7 +380,7 @@ export default function TokensPage() {
             )}
             <div className={styles.field}>
               <label className={styles.label} htmlFor="token-account">
-                机器人账号（可选）
+                机器人名称（可选）
               </label>
               <input
                 id="token-account"
@@ -407,8 +419,8 @@ export default function TokensPage() {
               <div className={styles.issuedHead}>
                 <IconKey size={16} />
                 {issued.record.platform === 'kook'
-                  ? `Kook 机器人「${issued.record.nickname || issued.record.id}」已添加`
-                  : `令牌已签发给「${issued.record.nickname || issued.record.id}」——明文只显示这一次`}
+                  ? `Kook 机器人「${issued.record.account || issued.record.id}」已添加`
+                  : `令牌已签发给「${issued.record.account || issued.record.id}」——明文只显示这一次`}
               </div>
               {issued.record.platform !== 'kook' && (
                 <div className={styles.issuedRow}>
@@ -435,7 +447,7 @@ export default function TokensPage() {
           title={
             <span className={styles.detailTitle}>
               <IconRobot size={18} />
-              {detailToken.nickname || detailToken.id}
+              {detailToken.account || detailToken.id}
             </span>
           }
           onClose={() => setDetailId(null)}
@@ -493,7 +505,7 @@ export default function TokensPage() {
             <div className={styles.detailSection}>令牌信息</div>
             <dl className={styles.detailList}>
               <div>
-                <dt>机器人账号</dt>
+                <dt>机器人名称</dt>
                 <dd className={detailToken.account ? undefined : styles.muted}>
                   {detailToken.account || '—'}
                 </dd>
@@ -517,13 +529,8 @@ export default function TokensPage() {
                 aria-checked={detailToken.enabled}
                 aria-label={detailToken.enabled ? '停用令牌' : '启用令牌'}
                 className={`switch ${detailToken.enabled ? 'switch-on' : ''}`}
-                disabled={busy}
-                onClick={() =>
-                  void run(
-                    () => setBotEnabled(detailToken.id, !detailToken.enabled),
-                    detailToken.enabled ? '机器人已停用，客户端已断开' : '机器人已启用',
-                  )
-                }
+                disabled={togglingId === detailToken.id}
+                onClick={() => void toggleEnabled(detailToken)}
               >
                 <span className="switch-knob" />
               </button>
