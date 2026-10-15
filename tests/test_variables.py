@@ -589,6 +589,29 @@ class TestVariableViewers:
         assert await env.cache.list_range(key) == ["a"]  # 本体没动
         assert await env.cache.hash_get(f"workflow:index:acct:{owner}", key) == "cache"  # 目录没翻新
 
+    async def test_dynamic_key_cache_variable_uses_registered_type(self, env: Env) -> None:
+        """cache 节点 key 动态接线（config 无手填 key）反查不到来源：按目录登记类型查看与改写。
+
+        回归：接口层 context() 不带登记类型时，这类变量会被 probe 猜成 str，保存时报
+        「已被 cache 类型登记，str 类型不能覆盖」的 409 —— 现在应正常按缓存类型改写。
+        """
+        token, owner = await login(env.client, ADMIN)
+        ident = await writer_graph(env, owner, "cache", "")  # key 接线，config 不填
+        key = f"workflow:graph:{ident}:884171955"
+        await env.cache.set(key, "旧值")
+        await index_variable(env.cache, owner, key, type_id="cache")
+        params = graph_params(ident, "884171955")
+        data = page_of(
+            await env.client.get(f"{VARIABLES_PATH}/value", headers=auth(token), params=params)
+        )
+        assert data["type"] == "str" and data["type_label"] == "缓存" and data["editable"]
+        response = await env.client.post(
+            f"{VARIABLES_PATH}/add", headers=auth(token), params=params, json={"value": "新值"}
+        )
+        assert response.status_code == 200
+        assert await env.cache.get(key) == "新值"  # 本体改写成功
+        assert await env.cache.hash_get(f"workflow:index:acct:{owner}", key) == "cache"  # 登记保持 cache
+
     async def test_partial_storage_failure_never_returns_success(self, env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
         from tickneko.core.cache.models import CacheError
 

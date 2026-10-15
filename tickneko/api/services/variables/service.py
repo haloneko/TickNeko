@@ -101,15 +101,24 @@ class VariableService:
         if scope == "account":
             if not owner_id or ":" in owner_id or workflow_id:
                 raise ValueError("账号级变量需要合法 owner_id，不能指定 workflow_id")
-            return self._bind(scope, key, owner_id=owner_id)
+            variable = self.center.key(scope, key, owner_id=owner_id)
+            return self._bind(
+                scope,
+                key,
+                owner_id=owner_id,
+                type_id=await self.center.type_of(variable, owner_id=owner_id),
+            )
         if not workflow_id or ":" in workflow_id:
             raise ValueError("图级变量需要合法 workflow_id")
         record = await self._record(workflow_id)
+        owner_id = record.owner_id if record else ""
+        variable = self.center.key(scope, key, owner_id=owner_id, workflow_id=workflow_id)
         return self._bind(
             scope,
             key,
-            owner_id=record.owner_id if record else "",
+            owner_id=owner_id,
             workflow_id=workflow_id,
+            type_id=await self.center.type_of(variable, owner_id=owner_id),
         )
 
     def _bind(
