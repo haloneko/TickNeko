@@ -112,80 +112,61 @@ async def _prepare_stores(
 async def on_platform_event(event: PlatformEvent) -> None:
     """bridge 事件订阅：业务接这里。
 
-    认的是 :class:`~tickneko.platforms.bridge.models.PlatformEvent`，**不再认识任何平台事件** ——
-    平台差异（OneBot 的整数号、Kook 的字符串号）在适配器里翻译掉了。要发消息走
-    ``gateway.send(platform, owner_id, action, ...)``。
-
-    ``kind=message`` 的事件拆成普通数据（``trigger_data`` + ``owner_id`` / ``user_id``）交给
-    消息路由（``MessageRouter.dispatch``）触发 ``trigger=message`` 的工作流 —— 「PlatformEvent
-    拆成普通数据」这一步就发生在这里，消息路由本身不 import bridge，依赖方向不破。
-
-    事件的审计日志（收到消息 / 收到事件）统一由 ``Gateway.publish`` 记，这里只做分发。
+    只认 :class:`~tickneko.platforms.bridge.models.PlatformEvent`，按事件大类挑路由分发；
+    平台差异由适配器翻译掉了，要发消息走 ``gateway.send(platform, owner_id, action, ...)``。
+    审计日志由 ``Gateway.publish`` 统一记，这里只做分发。
     """
-    # 事件本身的审计日志（收到消息 / 收到事件）由 Gateway.publish 统一记一份，
-    # 这里只管业务分发、不再重复记日志。
-    if event.kind == "meta":
-        # 连接生命周期 / 心跳一类：与业务无关，静默（审计日志 Gateway 已记）
-        return
-    if event.kind != "message":
-        # 通知 / 请求（加好友、进群、撤回、戳一戳…）：交给**事件路由**，
-        # 触发订阅了这种事件的 trigger=event 工作流；没订阅就没人跑（路由内部按类型匹配）。
-        await _dispatch_event(event)
-        return
-    router = _message_router
+    router = _router_for(event.kind)
     if router is None:
-        return  # 装配还没走到建路由（或没配消息触发）—— 不该发生，防御性放过
-    log = default_core().child("bridge")
-    try:
-        await router.dispatch(
-            event.owner_id,
-            trigger_data={
-                "message": event.text,
-                "user_id": event.user_id,
-                "platform": event.platform,
-                "chat": event.chat,
-                "chat_id": event.chat_id,
-                "message_id": event.message_id,
-                #: 会话定位（回程地址）：start 的 target 出口原样透给下游 send 节点
-                #: （回复触发它的会话）。workflow 只透传这个对象，不 import bridge 类型 ——
-                #: 它认的是「有 platform 属性的东西」，路由键就够用了。没有会话指向的事件是 None。
-                "target": event.target,
-            },
-        )
-    except Exception:  # noqa: BLE001 — 消息入口尽力而为，别让一条坏事件拖垮整条链路
-        log.exception("消息事件分发失败", platform=event.platform, owner_id=event.owner_id)
+        # meta（连接生命周期 / 心跳）与业务无关，静默（审计日志 Gateway 已记）；
+        # 路由还没装配（启动早期）也是 None —— 防御性放过
+        return
+    await _dispatch(router, event)
 
 
-async def _dispatch_event(event: PlatformEvent) -> None:
-    """通知 / 请求类事件 -> 事件路由（``trigger=event`` 的工作流按订阅的类型匹配）。
+def _router_for(kind: str) -> MessageRouter | EventRouter | None:
+    """事件大类 -> 路由：``message`` 走消息路由、``notice`` / ``request`` 走事件路由，
+    其余（``meta`` / 路由未装配）返回 ``None`` 静默放过。
+    """
+    if kind == "message":
+        return _message_router
+    if kind in ("notice", "request"):
+        return _event_router
+    return None
 
-    同样只认普通数据：事件类型 / 谁 / 哪个会话 / 带的文本 / 会话定位一并交出去，
-    路由与工作流都不 import bridge（依赖方向同消息那条路）。
+
+def _trigger_data(event: PlatformEvent) -> dict[str, object]:
+    """PlatformEvent -> 路由认的普通数据（消息 / 事件共用一份形状，全量平铺）。
+
+    消息流认 ``message``、事件流认 ``event_type`` / ``text``，各自只读自己的键；
+    ``target`` 是会话定位（回程地址），没有会话指向的事件是 ``None``。
+    """
+    return {
+        "event_type": event.event_type,
+        "message": event.text,
+        "text": event.text,
+        "user_id": event.user_id,
+        "platform": event.platform,
+        "self_id": event.self_id,
+        "chat": event.chat,
+        "chat_id": event.chat_id,
+        "message_id": event.message_id,
+        "target": event.target,
+    }
+
+
+async def _dispatch(router: MessageRouter | EventRouter, event: PlatformEvent) -> None:
+    """把一条事件送进对应路由：拆数据 -> 分发，消息 / 事件共用一个执行口。
+
+    事件路由多一道过滤：没有事件类型的事件静默丢掉，别让「订阅任何事件（*）」的图被拉起。
+    单个坏事件只记日志、不拖垮整条链路。
     """
     log = default_core().child("bridge")
-    if not event.event_type:
-        # 没有事件类型的事件（如 Kook 的系统消息）：订阅不了、也无从匹配，
-        # 静默丢掉 —— 别让「订阅任何事件（*）」的图被这种东西拉起来
+    if isinstance(router, EventRouter) and not event.event_type:
         log.debug("收到没有事件类型的事件，已忽略", platform=event.platform, kind=event.kind)
         return
-    router = _event_router
-    if router is None:
-        return  # 装配还没走到建事件路由（或没配事件触发）—— 防御性放过
     try:
-        await router.dispatch(
-            event.owner_id,
-            trigger_data={
-                "event_type": event.event_type,
-                "user_id": event.user_id,
-                "platform": event.platform,
-                "self_id": event.self_id,
-                "chat": event.chat,
-                "chat_id": event.chat_id,
-                "text": event.text,
-                "message_id": event.message_id,
-                "target": event.target,
-            },
-        )
+        await router.dispatch(event.owner_id, trigger_data=_trigger_data(event))
     except Exception:  # noqa: BLE001 — 事件入口尽力而为，别让一条坏事件拖垮整条链路
         log.exception(
             "平台事件分发失败",

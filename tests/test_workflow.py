@@ -4574,9 +4574,12 @@ async def test_on_platform_event_dispatches_message_to_router() -> None:
             (
                 "",
                 {
+                    "event_type": "",
                     "message": "你好",
+                    "text": "你好",
                     "user_id": "10001",
                     "platform": "onebot",
+                    "self_id": "",
                     "chat": "group",
                     "chat_id": "123",
                     "message_id": "42",
@@ -5001,13 +5004,13 @@ async def test_event_without_type_is_not_dispatched(
     router.register("any-flow", 1, "u-admin", "*")
     monkeypatch.setattr(bootstrap, "_event_router", router)
 
-    await bootstrap._dispatch_event(
+    await bootstrap.on_platform_event(
         PlatformEvent(platform="kook", owner_id="u-admin", kind="notice")
     )
     assert calls == []
 
     # 有事件类型才会分发（同一份路由）
-    await bootstrap._dispatch_event(
+    await bootstrap.on_platform_event(
         PlatformEvent(platform="onebot", owner_id="u-admin", kind="notice", event_type="poke")
     )
     assert calls == ["any-flow"]
