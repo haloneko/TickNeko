@@ -265,7 +265,9 @@ export default function VariablesPage() {
                 </thead>
                 <tbody>
                   {query.items.map((entry) => (
-                    <tr key={`${entry.scope}:${entry.owner_id}:${entry.workflow_id}:${entry.key}`}>
+                    <tr
+                      key={`${entry.scope}:${entry.owner_id}:${entry.workflow_id}:${entry.key}`}
+                    >
                       <td>
                         <span className={styles.scopeBadge} data-scope={entry.scope}>
                           {SCOPE_LABELS[entry.scope] ?? entry.scope}

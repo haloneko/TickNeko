@@ -1,0 +1,13 @@
+.editor :global(.cm-editor) {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.editor :global(.cm-editor.cm-focused) {
+  border-color: var(--primary, var(--border-strong));
+  outline: none;
+}
+.editor :global(.cm-scroller) {
+  max-height: 420px;
+}

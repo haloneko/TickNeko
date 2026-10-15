@@ -1,8 +1,9 @@
 /** 按查看器展示类型渲染、编辑和调用 add；保存后重新读取，失败保留草稿。
  * 列表行只带元信息（不读本体值），点「查看 / 编辑」打开弹窗时才拉详情。 */
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Modal } from '../../common/Modal'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
+import { JsonEditor, type JsonEditorHandle } from '../../common/JsonEditor'
 import { ApiRequestError } from '../../lib/http'
 import {
   addVariable,
@@ -168,6 +169,11 @@ export default function VariableValueViewer({
   const [jsonError, setJsonError] = useState('')
   // 未保存草稿时点关闭，先弹确认再真正关
   const [pendingClose, setPendingClose] = useState(false)
+  // list / dict 表单视图的过滤定位（按值文本或字段名），只收窄显示、不动草稿
+  const [filter, setFilter] = useState('')
+  // CodeMirror 实例句柄：json 类型与 list/dict JSON 视图各一个，用于格式化
+  const jsonTypeRef = useRef<JsonEditorHandle>(null)
+  const jsonViewRef = useRef<JsonEditorHandle>(null)
 
   function applySnapshot(snapshot: VariableEntry) {
     setCurrent(snapshot)
@@ -192,6 +198,7 @@ export default function VariableValueViewer({
     setViewMode('form')
     setJsonText('')
     setJsonError('')
+    setFilter('')
     setDirty(false)
   }
 
@@ -299,17 +306,23 @@ export default function VariableValueViewer({
     }
   }
 
-  /** 格式化重排 JSON；无效时行内报错，不动原文本。 */
-  function formatJson() {
-    try {
-      setJsonText(
-        JSON.stringify(parseValue({ text: jsonText, format: 'json' }), null, 2) ?? 'null',
-      )
-      setJsonError('')
-    } catch (err) {
-      setJsonError(errorMessage(err))
-    }
-  }
+  /** 表单视图过滤：list 按值文本，dict 按字段名+值；保留原始编号定位，不影响草稿。 */
+  const visibleItems = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    const all = items.map((item, index) => ({ item, index }))
+    return q ? all.filter(({ item }) => item.text.toLowerCase().includes(q)) : all
+  }, [filter, items])
+
+  const visibleFields = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    const all = fields.map((field, index) => ({ field, index }))
+    return q
+      ? all.filter(
+          ({ field }) =>
+            field.field.toLowerCase().includes(q) || field.value.text.toLowerCase().includes(q),
+        )
+      : all
+  }, [filter, fields])
 
   /** 新增元素 / 字段先进本地草稿，随保存一次全量提交（后端 `items`/`fields` 覆盖语义不变）。 */
   function add() {
@@ -402,7 +415,7 @@ export default function VariableValueViewer({
             </>
           ) : (
             <fieldset disabled={busy} className={styles.editor}>
-              {(current.type === 'str' || current.type === 'json') && (
+              {current.type === 'str' && (
                 <textarea
                   className={styles.control}
                   aria-label="变量值"
@@ -413,6 +426,28 @@ export default function VariableValueViewer({
                     edited()
                   }}
                 />
+              )}
+              {current.type === 'json' && (
+                <>
+                  <JsonEditor
+                    ref={jsonTypeRef}
+                    value={text}
+                    onChange={(value) => {
+                      setText(value)
+                      edited()
+                    }}
+                    ariaLabel="变量 JSON"
+                  />
+                  <div className={styles.toolbar}>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => jsonTypeRef.current?.format()}
+                    >
+                      格式化
+                    </button>
+                  </div>
+                </>
               )}
               {(current.type === 'list' || current.type === 'dict') && (
                 <div className={styles.viewSwitch}>
@@ -434,19 +469,22 @@ export default function VariableValueViewer({
               )}
               {viewMode === 'json' && (current.type === 'list' || current.type === 'dict') && (
                 <>
-                  <textarea
-                    className={styles.control}
-                    aria-label="变量 JSON"
-                    rows={12}
+                  <JsonEditor
+                    ref={jsonViewRef}
                     value={jsonText}
-                    onChange={(event) => {
-                      setJsonText(event.target.value)
+                    onChange={(value) => {
+                      setJsonText(value)
                       setJsonError('')
                       edited()
                     }}
+                    ariaLabel="变量 JSON"
                   />
                   <div className={styles.toolbar}>
-                    <button type="button" className="btn" onClick={formatJson}>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => jsonViewRef.current?.format()}
+                    >
                       格式化
                     </button>
                     {jsonError && (
@@ -457,10 +495,31 @@ export default function VariableValueViewer({
                   </div>
                 </>
               )}
+              {viewMode === 'form' && (current.type === 'list' || current.type === 'dict') && (
+                <div className={styles.toolbar}>
+                  <input
+                    className={styles.control}
+                    type="search"
+                    placeholder={current.type === 'list' ? '过滤元素…' : '过滤字段名或值…'}
+                    aria-label="过滤"
+                    value={filter}
+                    onChange={(event) => setFilter(event.target.value)}
+                  />
+                  {filter.trim() && (
+                    <span className={styles.hint}>
+                      显示 {current.type === 'list' ? visibleItems.length : visibleFields.length}/
+                      {current.type === 'list' ? items.length : fields.length} 项
+                    </span>
+                  )}
+                </div>
+              )}
               {current.type === 'list' && viewMode === 'form' && (
                 <>
                   {items.length === 0 && <p className={styles.hint}>空列表</p>}
-                  {items.map((item, index) => (
+                  {filter.trim() && visibleItems.length === 0 && (
+                    <p className={styles.hint}>没有匹配的元素</p>
+                  )}
+                  {visibleItems.map(({ item, index }) => (
                     <div className={styles.item} key={index}>
                       <div className={styles.itemHead}>
                         <span>第 {index + 1} 项</span>
@@ -504,7 +563,10 @@ export default function VariableValueViewer({
               {current.type === 'dict' && viewMode === 'form' && (
                 <>
                   {fields.length === 0 && <p className={styles.hint}>空字典</p>}
-                  {fields.map((field, index) => (
+                  {filter.trim() && visibleFields.length === 0 && (
+                    <p className={styles.hint}>没有匹配的字段</p>
+                  )}
+                  {visibleFields.map(({ field, index }) => (
                     <div className={styles.item} key={index}>
                       <div className={styles.itemHead}>
                         <input
