@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 from .service import (
-    VariableNotEditable,
+    VariableAlreadyExists,
     VariableNotFound,
+    VariableNotEditable,
     VariableService,
     VariableSnapshot,
+    VariableTypeInfo,
+    creatable_types,
 )
 
 __all__ = [
-    "VariableNotEditable",
+    "VariableAlreadyExists",
     "VariableNotFound",
+    "VariableNotEditable",
     "VariableService",
     "VariableSnapshot",
+    "VariableTypeInfo",
+    "creatable_types",
 ]

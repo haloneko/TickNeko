@@ -30,7 +30,7 @@ from tickneko.core.cache import Cache, CacheOptions  # noqa: E402
 from tickneko.workflow import SqlWorkflowStore  # noqa: E402
 from tickneko.workflow.nodes import registry  # noqa: E402
 from tickneko.workflow.nodes import (  # noqa: E402
-    StringViewer, VariableContext, declare_node_type,
+    StringViewer, VariableContext, declare_node_type, register_executor,
 )
 from tickneko.workflow.nodes.ds_container import DsListViewer  # noqa: E402
 
@@ -138,12 +138,16 @@ def isolate_viewers(monkeypatch: pytest.MonkeyPatch) -> None:
     """按用例隔离变量类型注册表：用例里临时声明的查看器别漏给别的用例。
 
     注册表是进程级的（节点模块 import 时就登记好了），而 ``type_id`` 全局唯一 —— 用例里
-    定义的子类不隔离就会互相撞 ``type_id``，也会被后面的用例 probe 到。
+    定义的子类不隔离就会互相撞 ``type_id``，也会被后面的用例 probe 到；
+    「有节点在维护」那份名单同样要隔离（可手工新建的类型照它筛）。
     """
     from tickneko.variables import viewer as viewer_module
 
     monkeypatch.setattr(
         viewer_module, "_VIEWERS_BY_TYPE", dict(viewer_module._VIEWERS_BY_TYPE)
+    )
+    monkeypatch.setattr(
+        viewer_module, "_NODE_VIEWER_TYPES", set(viewer_module._NODE_VIEWER_TYPES)
     )
 
 
@@ -386,6 +390,12 @@ async def writer_graph(env: Env, owner: str, node_type: str = "ds-list-append", 
 
 def graph_params(ident: str, key: str = "队列") -> dict[str, str]:
     return {"scope": "graph", "workflow_id": ident, "key": key}
+
+
+async def type_catalog(env: Env, token: str) -> dict[str, dict[str, object]]:
+    """可手工新建的类型清单（GET /variables/types），按 ``type_id`` 索引。"""
+    rows = page_of(await env.client.get(f"{VARIABLES_PATH}/types", headers=auth(token)))
+    return {row["type_id"]: row for row in rows}
 
 
 class TestVariableViewers:
@@ -775,3 +785,199 @@ class TestVariableDeletion:
         )
         assert response.status_code == 404
         assert await env.cache.keys("workflow:*") == []
+
+
+class TestVariableCreation:
+    """手工新建变量：类型清单、按类型登记（本体为空）、冲突与越权。"""
+
+    async def test_type_catalog_lists_types_nodes_actually_maintain(self, env: Env) -> None:
+        """可新建的类型 = **有节点在维护**且能改写的那些：基础类型一个都不该出现。
+
+        基础查看器（文本 / JSON / 列表 / 字典）只是兜底与基类，现行节点里没有任何一个会写
+        它们 —— 建出来没人写、没人读，还占住变量名（同名节点写入会被类型守卫挡下）。
+        """
+        token, _ = await login(env.client, ADMIN)
+        assert (await env.client.get(f"{VARIABLES_PATH}/types")).status_code == 401
+        rows = await type_catalog(env, token)
+        # 三类节点各自的变量类型都在（展示类型照节点注册的给）
+        assert rows["cache"] == {"type_id": "cache", "label": "缓存", "view_type": "str"}
+        assert rows["ds-dict"]["view_type"] == "dict"
+        assert rows["ds-list"] == {
+            "type_id": "ds-list",
+            "label": "列表·计数",
+            "view_type": "list",
+        }
+        # 没有节点在用的一律不列：没有「文本 / JSON / 字典」节点，通用 list 还只读
+        assert set(rows) == {"cache", "ds-dict", "ds-list"}
+
+    async def test_declared_type_joins_catalog_only_once_a_node_implements_it(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """判据是「有节点在维护」而不是一份写死的名单：先声明后实现，类型自己进清单。"""
+        monkeypatch.setattr(registry, "_SPECS", dict(registry._SPECS))
+        isolate_viewers(monkeypatch)
+
+        class DraftViewer(DsListViewer):
+            type_id = "draft-list"
+            label = "草稿列表"
+
+        async def noop(node: object, ctx: object) -> dict[str, object]:
+            return {}  # 执行器内容无关紧要：带上它注册就算「有节点在维护」
+
+        token, _ = await login(env.client, ADMIN)
+        declare_node_type("draft-writer", variable_viewer=DraftViewer)
+        assert "draft-list" not in await type_catalog(env, token)  # 只有声明、没有实现
+
+        register_executor("draft-writer", noop, variable_viewer=DraftViewer)
+        assert (await type_catalog(env, token))["draft-list"]["label"] == "草稿列表"
+        assert (
+            await env.client.post(
+                VARIABLES_PATH,
+                headers=auth(token),
+                params={"scope": "account", "key": "草稿", "type_id": "draft-list"},
+            )
+        ).status_code == 200
+
+    async def test_create_registers_type_and_stays_editable(self, env: Env) -> None:
+        """新建 = 只登记类型、本体先空着：列表列得出来，空值也能看能编辑。"""
+        token, owner = await login(env.client, ADMIN)
+        created = page_of(
+            await env.client.post(
+                VARIABLES_PATH,
+                headers=auth(token),
+                params={"scope": "account", "key": "设置", "type_id": "ds-dict"},
+            )
+        )
+        assert created["type"] == "dict" and created["type_label"] == "键值对"
+        assert created["editable"] and created["owner_id"] == owner
+        # 空变量不占本体键，但目录里已登记 —— 枚举读目录，所以列表照常列出（不是「一个都没有」）
+        key = f"workflow:acct:{owner}:设置"
+        assert not await env.cache.exists(key)
+        assert await env.cache.hash_get(f"workflow:index:acct:{owner}", key) == "ds-dict"
+        page = page_of(await env.client.get(VARIABLES_PATH, headers=auth(token)))
+        assert [(row["key"], row["type"]) for row in page["items"]] == [("设置", "dict")]
+        # 空值不是 404：看得见空字典，随后按登记类型写值（走既有 add）
+        params = {"scope": "account", "owner_id": owner, "key": "设置"}
+        assert page_of(
+            await env.client.get(
+                f"{VARIABLES_PATH}/value", headers=auth(token), params=params
+            )
+        )["data"] == {}
+        saved = page_of(
+            await env.client.post(
+                f"{VARIABLES_PATH}/add",
+                headers=auth(token),
+                params=params,
+                json={"fields": {"a": "1"}},
+            )
+        )
+        assert saved["data"] == {"a": "1"}
+
+    async def test_create_graph_variable_needs_a_real_graph(self, env: Env) -> None:
+        """图级：归属来自工作流存储；图不存在不让建（不然会落进「不知道是谁」的空目录）。"""
+        token, owner = await login(env.client, ADMIN)
+        graph = await env.workflows.create(owner, "图一")
+        created = page_of(
+            await env.client.post(
+                VARIABLES_PATH,
+                headers=auth(token),
+                params={
+                    "scope": "graph",
+                    "workflow_id": graph.id,
+                    "key": "开关",
+                    "type_id": "cache",
+                },
+            )
+        )
+        assert created["owner_id"] == owner and created["workflow_id"] == graph.id
+        assert created["type"] == "str" and created["type_label"] == "缓存"
+
+        missing = await env.client.post(
+            VARIABLES_PATH,
+            headers=auth(token),
+            params={
+                "scope": "graph",
+                "workflow_id": "ghost",
+                "key": "开关",
+                "type_id": "cache",
+            },
+        )
+        assert missing.status_code == 404
+        assert await env.cache.hash_get("workflow:index:acct:", "workflow:graph:ghost:开关") is None
+
+    async def test_create_duplicate_name_is_409(self, env: Env) -> None:
+        """变量名即身份：已经有本体、或已被图里的节点声明，都拒绝新建，且不覆盖。"""
+        token, owner = await login(env.client, ADMIN)
+        key = f"workflow:acct:{owner}:计数"
+        await env.cache.set(key, "1")
+        response = await env.client.post(
+            VARIABLES_PATH,
+            headers=auth(token),
+            params={"scope": "account", "key": "计数", "type_id": "ds-dict"},
+        )
+        assert response.status_code == 409
+        assert await env.cache.get(key) == "1"  # 本体没被动过
+
+        # 名字已被图里的 cache 节点声明（本体还没写）：也不给建，别跟节点抢名字
+        ident = await writer_graph(env, owner, "cache", "开关")
+        declared = await env.client.post(
+            VARIABLES_PATH,
+            headers=auth(token),
+            params={
+                "scope": "graph",
+                "workflow_id": ident,
+                "key": "开关",
+                "type_id": "cache",
+            },
+        )
+        assert declared.status_code == 409
+        assert await env.cache.keys("workflow:*") == [key]  # 失败的尝试没留下登记
+
+    @pytest.mark.parametrize("type_id", ["str", "json", "dict", "list"])
+    async def test_create_rejects_types_without_a_node(self, env: Env, type_id: str) -> None:
+        """基础类型不给建 -> 409（没有节点会写它们），且不落残留；没注册的 id -> 422。"""
+        token, _ = await login(env.client, ADMIN)
+        rejected = await env.client.post(
+            VARIABLES_PATH,
+            headers=auth(token),
+            params={"scope": "account", "key": "计数", "type_id": type_id},
+        )
+        assert rejected.status_code == 409
+        assert "不支持手工新建" in rejected.json()["error"]["message"]
+
+        unknown = await env.client.post(
+            VARIABLES_PATH,
+            headers=auth(token),
+            params={"scope": "account", "key": "计数", "type_id": "nope"},
+        )
+        assert unknown.status_code == 422
+        assert await env.cache.keys("workflow:*") == []
+
+    async def test_create_enforces_auth_and_ownership(self, env: Env) -> None:
+        """没登录 401；普通用户不能往别人名下的图或账号里建（归属来自存储，伪造不了）。"""
+        admin_token, admin_id = await login(env.client, ADMIN)
+        plain_token, _ = await register(env.client, PLAIN)
+        graph = await env.workflows.create(admin_id, "图一")
+        graph_params: dict[str, str] = {
+            "scope": "graph",
+            "workflow_id": graph.id,
+            "key": "计数",
+            "type_id": "ds-list",
+        }
+        assert (await env.client.post(VARIABLES_PATH, params=graph_params)).status_code == 401
+        assert (
+            await env.client.post(
+                VARIABLES_PATH, headers=auth(plain_token), params=graph_params
+            )
+        ).status_code == 403
+        cross = {"scope": "account", "owner_id": admin_id, "key": "计数", "type_id": "cache"}
+        assert (
+            await env.client.post(VARIABLES_PATH, headers=auth(plain_token), params=cross)
+        ).status_code == 403
+        assert await env.cache.keys("workflow:*") == []
+
+        response = await env.client.post(
+            VARIABLES_PATH, headers=auth(admin_token), params=graph_params
+        )
+        assert response.status_code == 200
+        assert response.json()["data"]["owner_id"] == admin_id

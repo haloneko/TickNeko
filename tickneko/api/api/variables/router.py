@@ -13,12 +13,23 @@ from ...common.dependencies import trace_id_of
 from ...common.errors import ApiError, ErrorCode, HttpStatus
 from ...common.models import ApiResponse, ErrorResponse
 from ...services.auth.models import CurrentUser
-from ...services.variables import VariableNotEditable, VariableNotFound, VariableService
+from ...services.variables import (
+    VariableAlreadyExists,
+    VariableNotEditable,
+    VariableNotFound,
+    VariableService,
+    creatable_types,
+)
 from ..auth.dependencies import CurrentUserDep
 from ..onebot.dependencies import ensure_can_touch
 from ..workflow.dependencies import WorkflowStoreDep, owner_filter_of
 from .dependencies import CacheDep
-from .responses import VariableData, VariablePage, VariableSummary
+from .responses import (
+    VariableData,
+    VariablePage,
+    VariableSummary,
+    VariableTypeItem,
+)
 
 router = APIRouter(prefix="/variables", tags=["变量查看"])
 ALL_SCOPES: tuple[str, ...] = ("graph", "account")
@@ -37,7 +48,7 @@ _RESPONSES = {
     status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "变量不存在"},
     status.HTTP_409_CONFLICT: {
         "model": ErrorResponse,
-        "description": "查看器不允许修改",
+        "description": "查看器不允许修改 / 类型冲突 / 同名变量已存在",
     },
     HttpStatus.UNPROCESSABLE_ENTITY: {
         "model": ErrorResponse,
@@ -65,6 +76,11 @@ async def _call(operation: Awaitable[_T]) -> _T:
             ErrorCode.HTTP_ERROR, str(exc), status_code=status.HTTP_404_NOT_FOUND
         ) from exc
     except VariableNotEditable as exc:
+        raise ApiError(
+            ErrorCode.HTTP_ERROR, str(exc), status_code=status.HTTP_409_CONFLICT
+        ) from exc
+    except VariableAlreadyExists as exc:
+        # 变量名即身份：同名的新建请求不能覆盖已有变量，换名字或先删除。
         raise ApiError(
             ErrorCode.HTTP_ERROR, str(exc), status_code=status.HTTP_409_CONFLICT
         ) from exc
@@ -141,6 +157,66 @@ async def list_variables(
 
 
 @router.get(
+    "/types",
+    response_model=ApiResponse[list[VariableTypeItem]],
+    summary="可新建的变量类型清单",
+    responses=_RESPONSES,
+)
+async def list_variable_types(
+    request: Request,
+    user: CurrentUserDep,
+) -> ApiResponse[list[VariableTypeItem]]:
+    """新建变量时能选的类型：注册表里**能直接编辑**的那些（不碰缓存，也不碰任何人的数据）。"""
+    return ApiResponse[list[VariableTypeItem]](
+        data=[
+            VariableTypeItem(
+                type_id=item.type_id, label=item.label, view_type=item.view_type
+            )
+            for item in creatable_types()
+        ],
+        trace_id=trace_id_of(request),
+    )
+
+
+@router.post(
+    "",
+    response_model=ApiResponse[VariableData],
+    summary="新建变量（登记类型，本体为空）",
+    responses=_RESPONSES,
+)
+async def create_variable(
+    request: Request,
+    user: CurrentUserDep,
+    cache: CacheDep,
+    store: WorkflowStoreDep,
+    scope: str,
+    key: str,
+    type_id: str,
+    owner_id: str | None = None,
+    workflow_id: str = "",
+) -> ApiResponse[VariableData]:
+    """按 ``type_id`` 新建一个逻辑变量：只登记类型，本体先空着，随后照常查看 / 编辑。
+
+    定位口径与其余接口一致（图级传 ``scope=graph&workflow_id=…&key=…``；账号级传
+    ``scope=account&key=…``，省略归属取当前用户）。同名变量只能有一个：已存在（有本体、
+    已登记类型，或已被图里的节点声明）返回 409，不覆盖。
+    """
+    service = VariableService(cache, store)
+    context = await _context(
+        service,
+        user,
+        scope=scope,
+        key=key,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
+    )
+    snapshot = await _call(service.create(context, type_id))
+    return ApiResponse[VariableData](
+        data=VariableData.from_snapshot(snapshot), trace_id=trace_id_of(request)
+    )
+
+
+@router.get(
     "/value",
     response_model=ApiResponse[VariableData],
     summary="查看变量",
@@ -174,7 +250,7 @@ async def view_variable(
 @router.post(
     "/add",
     response_model=ApiResponse[VariableData],
-    summary="新增或保存变量",
+    summary="保存变量（整份交给查看器）",
     responses=_RESPONSES,
 )
 async def add_variable(

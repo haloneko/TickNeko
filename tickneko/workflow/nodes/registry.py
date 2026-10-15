@@ -85,7 +85,7 @@ def register_executor(
         variable_viewer=variable_viewer,
     )
     if variable_viewer is not None:
-        register_variable_viewer(variable_viewer)  # 这种变量类型当场登记进变量中枢
+        register_variable_viewer(variable_viewer, used_by_node=True)
 
 
 def declare_node_type(
@@ -130,7 +130,7 @@ def declare_node_type(
         variable_viewer=variable_viewer,
     )
     if variable_viewer is not None:
-        register_variable_viewer(variable_viewer)  # 这种变量类型当场登记进变量中枢
+        register_variable_viewer(variable_viewer)
 
 
 def register_node(
