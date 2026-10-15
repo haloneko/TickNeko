@@ -67,28 +67,73 @@
   border-radius: var(--r-sm);
   font: inherit;
 }
-textarea.control {
-  resize: vertical;
-  font-family: var(--font-mono);
+/* ---------- 表单视图的表格（list / dict）----------
+   列：序号 | 值 |（dict 还有键）| 操作；行内操作是纯图标按钮。 */
+.grid {
+  width: 100%;
+  border-collapse: collapse;
 }
-.valueInput {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px;
-  align-items: start;
-  gap: 6px;
-}
-.item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 0;
+.grid th,
+.grid td {
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
 }
-.itemHead {
-  display: flex;
-  justify-content: space-between;
+.grid th {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.grid tbody tr:last-child td {
+  border-bottom: 0;
+}
+.gridNo {
+  width: 40px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.gridOps {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+/* dict 未编辑时的只读单元格：保留换行、长内容自动断行 */
+.cellText {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* 正在编辑的 dict 行 */
+.rowEditing {
+  background: var(--surface-2);
+}
+/* 行内纯图标按钮 */
+.iconBtn {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  vertical-align: middle;
+}
+.iconBtn + .iconBtn {
+  margin-left: 2px;
+}
+.iconBtn:hover {
+  background: var(--nav-hover-bg);
+  color: var(--text-1);
+}
+.iconDanger:hover {
+  color: var(--danger);
+  border-color: var(--border-strong);
 }
 .newItem {
   display: flex;

@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 import { FullscreenDialog } from '../../common/FullscreenDialog'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { JsonEditor, type JsonEditorHandle } from '../../common/JsonEditor'
+import { IconCheck, IconCopy, IconEdit, IconTrash } from '../../common/icons'
 import { ApiRequestError } from '../../lib/http'
 import {
   addVariable,
@@ -94,37 +95,34 @@ function Preview({ entry, expanded = false }: { entry: VariableEntry; expanded?:
   }
 }
 
-function ValueInput({
-  value,
-  label,
-  onChange,
-}: {
-  value: ValueDraft
-  label: string
-  onChange: (value: ValueDraft) => void
-}) {
-  return (
-    <div className={styles.valueInput}>
-      <textarea
-        className={styles.control}
-        aria-label={label}
-        rows={value.format === 'json' ? 3 : 1}
-        value={value.text}
-        onChange={(event) => onChange({ ...value, text: event.target.value })}
-      />
-      <select
-        className={styles.control}
-        aria-label={`${label}格式`}
-        value={value.format}
-        onChange={(event) =>
-          onChange({ ...value, format: event.target.value as ValueDraft['format'] })
-        }
-      >
-        <option value="text">文本</option>
-        <option value="json">JSON</option>
-      </select>
-    </div>
-  )
+/** 复制一段文本到系统剪贴板：优先 clipboard API；非安全上下文（http + 局域网 IP）
+ * 没有它就退回临时 textarea + execCommand，保证本机 / 局域网访问都能用。 */
+async function copyText(text: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return
+    }
+  } catch {
+    // 没有权限 / 不可用：落到下面的兜底
+  }
+  const area = document.createElement('textarea')
+  area.value = text
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.top = '-9999px'
+  document.body.appendChild(area)
+  try {
+    area.select()
+    if (!document.execCommand('copy')) throw new Error('复制失败，请手动选择后复制')
+  } finally {
+    document.body.removeChild(area)
+  }
+}
+
+/** 删除第 index 行后，正在编辑的行号跟着挪位（被删的那行直接退出编辑）。 */
+function shiftRowAfterRemove(index: number): (row: number | null) => number | null {
+  return (row) => (row === null || row === index ? null : row < index ? row : row - 1)
 }
 
 function errorMessage(error: unknown): string {
@@ -171,6 +169,8 @@ export default function VariableValueViewer({
   const [pendingClose, setPendingClose] = useState(false)
   // list / dict 表单视图的过滤定位（按值文本或字段名），只收窄显示、不动草稿
   const [filter, setFilter] = useState('')
+  // dict 行默认只读展示，点「修改」才让这一行变成输入框（点「完成」退出）
+  const [editingRow, setEditingRow] = useState<number | null>(null)
   // CodeMirror 实例句柄：json 类型与 list/dict JSON 视图各一个，用于格式化
   const jsonTypeRef = useRef<JsonEditorHandle>(null)
   const jsonViewRef = useRef<JsonEditorHandle>(null)
@@ -196,6 +196,7 @@ export default function VariableValueViewer({
     setNewValue(emptyValue())
     setNewField('')
     setFilter('')
+    setEditingRow(null)
     setDirty(false)
     setJsonError('')
     if (keepView) return
@@ -350,6 +351,17 @@ export default function VariableValueViewer({
     setDirty(true)
     setNotice('')
     setError('')
+  }
+
+  /** 行内「复制」：把这一行的内容送进系统剪贴板，成功 / 失败都反馈到状态栏。 */
+  async function copyRow(text: string, label: string) {
+    try {
+      await copyText(text)
+      setNotice(`已复制${label}`)
+      setError('')
+    } catch (err) {
+      setError(errorMessage(err))
+    }
   }
 
   return (
@@ -542,32 +554,63 @@ export default function VariableValueViewer({
                   {filter.trim() && visibleItems.length === 0 && (
                     <p className={styles.hint}>没有匹配的元素</p>
                   )}
-                  {visibleItems.map(({ item, index }) => (
-                    <div className={styles.item} key={index}>
-                      <div className={styles.itemHead}>
-                        <span>第 {index + 1} 项</span>
-                        <button
-                          type="button"
-                          className="btn"
-                          aria-label={`删除第 ${index + 1} 项`}
-                          onClick={() => {
-                            setItems((values) => values.filter((_, i) => i !== index))
-                            edited()
-                          }}
-                        >
-                          删除
-                        </button>
-                      </div>
-                      <ValueInput
-                        value={item}
-                        label={`第 ${index + 1} 项`}
-                        onChange={(value) => {
-                          setItems((values) => values.map((old, i) => (i === index ? value : old)))
-                          edited()
-                        }}
-                      />
-                    </div>
-                  ))}
+                  {visibleItems.length > 0 && (
+                    <table className={styles.grid}>
+                      <thead>
+                        <tr>
+                          <th className={styles.gridNo}>#</th>
+                          <th>值</th>
+                          <th className={styles.gridOps}>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleItems.map(({ item, index }) => (
+                          <tr key={index}>
+                            <td className={styles.gridNo}>{index + 1}</td>
+                            <td>
+                              <input
+                                className={styles.control}
+                                aria-label={`第 ${index + 1} 项`}
+                                value={item.text}
+                                onChange={(event) => {
+                                  const next = event.target.value
+                                  setItems((values) =>
+                                    values.map((old, i) =>
+                                      i === index ? { ...old, text: next } : old,
+                                    ),
+                                  )
+                                  edited()
+                                }}
+                              />
+                            </td>
+                            <td className={styles.gridOps}>
+                              <button
+                                type="button"
+                                className={styles.iconBtn}
+                                title="复制到剪贴板"
+                                aria-label={`复制第 ${index + 1} 项`}
+                                onClick={() => void copyRow(item.text, `第 ${index + 1} 项`)}
+                              >
+                                <IconCopy size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className={`${styles.iconBtn} ${styles.iconDanger}`}
+                                title="删除"
+                                aria-label={`删除第 ${index + 1} 项`}
+                                onClick={() => {
+                                  setItems((values) => values.filter((_, i) => i !== index))
+                                  edited()
+                                }}
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                   <div className={styles.toolbar}>
                     <button
                       type="button"
@@ -589,52 +632,118 @@ export default function VariableValueViewer({
                   {filter.trim() && visibleFields.length === 0 && (
                     <p className={styles.hint}>没有匹配的字段</p>
                   )}
-                  {visibleFields.map(({ field, index }) => (
-                    <div className={styles.item} key={index}>
-                      <div className={styles.itemHead}>
-                        <input
-                          className={styles.control}
-                          aria-label={`字段 ${index + 1} 的名称`}
-                          value={field.field}
-                          onChange={(event) => {
-                            setFields((values) =>
-                              values.map((old, i) =>
-                                i === index ? { ...old, field: event.target.value } : old,
-                              ),
-                            )
-                            edited()
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="btn"
-                          aria-label={`删除字段 ${index + 1}`}
-                          onClick={() => {
-                            setFields((values) => values.filter((_, i) => i !== index))
-                            edited()
-                          }}
-                        >
-                          删除
-                        </button>
-                      </div>
-                      <ValueInput
-                        value={field.value}
-                        label={`字段 ${index + 1} 的值`}
-                        onChange={(value) => {
-                          setFields((values) =>
-                            values.map((old, i) => (i === index ? { ...old, value } : old)),
+                  {visibleFields.length > 0 && (
+                    <table className={styles.grid}>
+                      <thead>
+                        <tr>
+                          <th className={styles.gridNo}>#</th>
+                          <th>键</th>
+                          <th>值</th>
+                          <th className={styles.gridOps}>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleFields.map(({ field, index }) => {
+                          const editing = editingRow === index
+                          return (
+                            <tr key={index} className={editing ? styles.rowEditing : undefined}>
+                              <td className={styles.gridNo}>{index + 1}</td>
+                              <td>
+                                {editing ? (
+                                  <input
+                                    className={styles.control}
+                                    aria-label={`字段 ${index + 1} 的名称`}
+                                    value={field.field}
+                                    onChange={(event) => {
+                                      const name = event.target.value
+                                      setFields((values) =>
+                                        values.map((old, i) =>
+                                          i === index ? { ...old, field: name } : old,
+                                        ),
+                                      )
+                                      edited()
+                                    }}
+                                  />
+                                ) : (
+                                  <span className={styles.cellText}>
+                                    {field.field || '（空名）'}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {editing ? (
+                                  <input
+                                    className={styles.control}
+                                    aria-label={`字段 ${index + 1} 的值`}
+                                    value={field.value.text}
+                                    onChange={(event) => {
+                                      const text = event.target.value
+                                      setFields((values) =>
+                                        values.map((old, i) =>
+                                          i === index
+                                            ? { ...old, value: { ...old.value, text } }
+                                            : old,
+                                        ),
+                                      )
+                                      edited()
+                                    }}
+                                  />
+                                ) : (
+                                  <span className={styles.cellText}>
+                                    {field.value.text === '' ? '（空字符串）' : field.value.text}
+                                  </span>
+                                )}
+                              </td>
+                              <td className={styles.gridOps}>
+                                <button
+                                  type="button"
+                                  className={styles.iconBtn}
+                                  title="复制到剪贴板"
+                                  aria-label={`复制字段 ${index + 1}`}
+                                  onClick={() =>
+                                    void copyRow(`${field.field}=${field.value.text}`, `字段 ${index + 1}`)
+                                  }
+                                >
+                                  <IconCopy size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className={styles.iconBtn}
+                                  title={editing ? '完成' : '修改'}
+                                  aria-label={
+                                    editing ? `完成字段 ${index + 1}` : `修改字段 ${index + 1}`
+                                  }
+                                  onClick={() => setEditingRow(editing ? null : index)}
+                                >
+                                  {editing ? <IconCheck size={14} /> : <IconEdit size={14} />}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`${styles.iconBtn} ${styles.iconDanger}`}
+                                  title="删除"
+                                  aria-label={`删除字段 ${index + 1}`}
+                                  onClick={() => {
+                                    setFields((values) => values.filter((_, i) => i !== index))
+                                    setEditingRow(shiftRowAfterRemove(index))
+                                    edited()
+                                  }}
+                                >
+                                  <IconTrash size={14} />
+                                </button>
+                              </td>
+                            </tr>
                           )
-                          edited()
-                        }}
-                      />
-                    </div>
-                  ))}
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                   <div className={styles.toolbar}>
                     <button
                       type="button"
                       className="btn"
                       onClick={() => {
                         setFields([])
+                        setEditingRow(null)
                         edited()
                       }}
                     >
@@ -656,7 +765,15 @@ export default function VariableValueViewer({
                       onChange={(event) => setNewField(event.target.value)}
                     />
                   )}
-                  <ValueInput value={newValue} label="新增值" onChange={setNewValue} />
+                  <input
+                    className={styles.control}
+                    aria-label="新增值"
+                    placeholder="值"
+                    value={newValue.text}
+                    onChange={(event) =>
+                      setNewValue((value) => ({ ...value, text: event.target.value }))
+                    }
+                  />
                   <div className={styles.toolbar}>
                     <button type="button" className="btn" onClick={add}>
                       新增
