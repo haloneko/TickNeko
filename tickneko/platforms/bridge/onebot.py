@@ -230,9 +230,17 @@ class OneBotAdapter:
         """停服：关监听并断开所有客户端（幂等）。"""
         await self._server.stop()
 
-    def clients(self, *, owner_id: str | None = None) -> tuple[BotClient, ...]:
-        """在线列表快照（规范化口径）；给 ``owner_id`` 就只看那个归属下的。"""
-        return tuple(_client(entry) for entry in self._server.roster(id=owner_id))
+    def clients(
+        self,
+        *,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+    ) -> tuple[BotClient, ...]:
+        """在线列表快照（规范化口径）；给 ``owner_id`` 只看那个归属下的，给 ``bot_id`` 只看那台机器人下的。"""
+        return tuple(
+            _client(entry)
+            for entry in self._server.roster(id=owner_id, bot_id=bot_id)
+        )
 
     async def send(self, owner_id: str, action: str, /, **params: object) -> ActionResult:
         """给 ``owner_id`` 的在线连接发一个动作并等回执。

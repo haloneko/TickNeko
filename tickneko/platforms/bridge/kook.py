@@ -257,17 +257,25 @@ class KookAdapter:
         await self.start()
         await self._stopped.wait()
 
-    def clients(self, *, owner_id: str | None = None) -> tuple[BotClient, ...]:
+    def clients(
+        self,
+        *,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+    ) -> tuple[BotClient, ...]:
         """在线列表快照：每个连上的机器人一行（归属 = 框架用户），没连上是空。
 
         「连没连」由客户端自己交代（``connected``），不靠 self_id —— 机器人刚连上、
         还没收到第一条事件（self_id 未学到）时，连接也是活的，该列出来。
+        过滤键是 **bot_id**（一台机器人一行）：给 ``bot_id`` 只看那台、给 ``owner_id``
+        （旧名，等同 bot_id）也只看那台。
         """
         rows: list[BotClient] = []
+        filter_id = bot_id if bot_id is not None else owner_id
         for bot_id, client in self._clients.items():
             if not client.connected:
                 continue
-            if owner_id is not None and bot_id != owner_id:
+            if filter_id is not None and bot_id != filter_id:
                 continue
             rows.append(
                 BotClient(
