@@ -126,9 +126,13 @@
   align-items: center;
   gap: 8px;
 }
-.switchOnLabel {
-  font-size: 12px;
+/* 启用状态标签：只换颜色，字号字重跟 .muted 一致（继承父级），避免切换时文字大小跳动 */
+/* 开关状态标签的统一尺寸：两种状态共用，只有颜色随状态切换 */
+.switchLabel {
+  font-size: 11px;
   font-weight: 500;
+}
+.switchOnLabel {
   color: var(--success);
 }
 

@@ -305,7 +305,9 @@ export default function TokensPage() {
                       >
                         <span className="switch-knob" />
                       </button>
-                      <span className={t.enabled ? styles.switchOnLabel : styles.muted}>
+                      <span
+                        className={`${styles.switchLabel} ${t.enabled ? styles.switchOnLabel : styles.muted}`}
+                      >
                         {t.enabled ? '启用' : '停用'}
                       </span>
                     </div>
@@ -534,7 +536,9 @@ export default function TokensPage() {
               >
                 <span className="switch-knob" />
               </button>
-              <span className={detailToken.enabled ? styles.switchOnLabel : styles.muted}>
+              <span
+                className={`${styles.switchLabel} ${detailToken.enabled ? styles.switchOnLabel : styles.muted}`}
+              >
                 {detailToken.enabled ? '启用' : '停用'}
               </span>
             </div>
