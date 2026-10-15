@@ -23,7 +23,9 @@ from tickneko.variables import (
     VariableRule,
     VariableView,
     VariableViewer,
+    VariableViewType,
     get_variable_viewer,
+    node_variable_viewers,
     parse_variable_key,
     registered_variable_viewers,
 )
@@ -51,6 +53,41 @@ class VariableNotFound(LookupError):
 
 class VariableNotEditable(RuntimeError):
     """来源未开放查看器、规则冲突或无法安全确定写入语义。"""
+
+
+class VariableAlreadyExists(LookupError):
+    """这个名字已经有变量了：有本体、登记过类型，或被图里的节点声明。
+
+    变量名即身份，新建**不覆盖**已有的那个 —— 想换类型先删除，想改值走 ``add``。
+    """
+
+
+@dataclass(frozen=True)
+class VariableTypeInfo:
+    """一种**能手工新建**的变量类型（前端下拉的选项）。"""
+
+    type_id: str
+    label: str
+    view_type: VariableViewType
+
+
+def creatable_types() -> list[VariableTypeInfo]:
+    """能手工新建的变量类型清单（按 ``type_id`` 排序）。
+
+    判据两条，缺一不可：
+
+    * **有节点在维护**（:func:`~tickneko.variables.node_variable_viewers`）：变量靠节点写入，
+        没有节点声明的类型建出来没人写 —— 基础类型 ``str`` / ``json`` / ``dict`` 只是兜底与
+        基类（``list`` 还兼作缺来源时的只读探测），现行节点里一个都没用到；
+    * 查看器允许改写（``probe_editable``）：建完得能直接编辑。
+
+    有节点（带执行器）注册了某种查看器，它自己就会出现在这份清单里，不用改这里。
+    """
+    return [
+        VariableTypeInfo(viewer.type_id, viewer.label, viewer.view_type)
+        for viewer in node_variable_viewers()
+        if viewer.probe_editable
+    ]
 
 
 @dataclass(frozen=True)
@@ -101,15 +138,24 @@ class VariableService:
         if scope == "account":
             if not owner_id or ":" in owner_id or workflow_id:
                 raise ValueError("账号级变量需要合法 owner_id，不能指定 workflow_id")
-            return self._bind(scope, key, owner_id=owner_id)
+            variable = self.center.key(scope, key, owner_id=owner_id)
+            return self._bind(
+                scope,
+                key,
+                owner_id=owner_id,
+                type_id=await self.center.type_of(variable, owner_id=owner_id),
+            )
         if not workflow_id or ":" in workflow_id:
             raise ValueError("图级变量需要合法 workflow_id")
         record = await self._record(workflow_id)
+        owner_id = record.owner_id if record else ""
+        variable = self.center.key(scope, key, owner_id=owner_id, workflow_id=workflow_id)
         return self._bind(
             scope,
             key,
-            owner_id=record.owner_id if record else "",
+            owner_id=owner_id,
             workflow_id=workflow_id,
+            type_id=await self.center.type_of(variable, owner_id=owner_id),
         )
 
     def _bind(
@@ -399,6 +445,42 @@ class VariableService:
             context, await self._attributes_aware(context, await viewer.view())
         )
 
+    async def create(self, context: VariableContext, type_id: str) -> VariableSnapshot:
+        """按**指定类型**新建一个逻辑变量：先只登记类型（与属性表），本体空着。
+
+        类型只认 :func:`creatable_types` 那一份（有节点在维护 + 能改写）：基础类型与只读
+        类型都不许手工建，免得建出没人写、或建完改不动的变量。不认识 ``type_id`` 是
+        ``ValueError``（422），认识但不给建是 :class:`VariableNotEditable`（409）。
+
+        变量名即身份，所以「这个名字已经有本体、已经登记过类型、已被图里的节点声明」都算
+        已存在，一律 :class:`VariableAlreadyExists`（409）—— 新建不覆盖、不改名，换类型
+        只能先删除。
+
+        新建出来的是**空变量**：本体不占存储键（见 docs/variables/variables.md「类型墓碑」），
+        目录里已有登记，所以列表照常列出、按登记类型查看与编辑（空值），编辑走既有的
+        :meth:`add`。
+        """
+        allowed = {item.type_id for item in creatable_types()}
+        if type_id not in allowed:
+            if get_variable_viewer(type_id) is None:
+                raise ValueError(f"没有注册的变量类型：{type_id}")  # 认都不认识 -> 422
+            raise VariableNotEditable(
+                f"变量类型 {type_id} 不支持手工新建：只有有节点在维护、且能改写的类型才能建"
+            )
+        if context.scope == "graph" and not context.owner_id:
+            # 图查不到就没有归属者，登记会落进「不知道是谁」的空目录（见中枢的 _owner）。
+            raise VariableNotFound("查不到这张图，不能在它上面新建变量")
+        resolution = await self.resolve(context)
+        if resolution.viewer is not None or await self.cache.exists(context.full_key):
+            raise VariableAlreadyExists(
+                "这个名字已经有变量了（或已被图里的节点声明），换个名字或先删除它"
+            )
+        await self.center.remember(
+            context.variable_key, type_id, owner_id=context.owner_id
+        )
+        # 上下文里的 type_id 是**登记前**查的，重新绑定一次，让这次响应就走登记类型。
+        return await self.summary(replace(context, type_id=type_id))
+
     async def delete(self, context: VariableContext) -> None:
         """删除一个逻辑变量；本体不存在抛 ``VariableNotFound``。
 
@@ -411,9 +493,12 @@ class VariableService:
 
 
 __all__ = [
+    "VariableAlreadyExists",
     "VariableNotFound",
     "VariableNotEditable",
     "VariableService",
     "VariableSnapshot",
     "VariableStore",
+    "VariableTypeInfo",
+    "creatable_types",
 ]

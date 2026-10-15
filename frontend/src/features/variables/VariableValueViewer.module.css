@@ -47,6 +47,14 @@
   margin: 0;
   padding: 0;
   min-width: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.padded {
+  padding: 20px 24px 32px;
 }
 .control {
   box-sizing: border-box;
@@ -59,32 +67,121 @@
   border-radius: var(--r-sm);
   font: inherit;
 }
-textarea.control {
-  resize: vertical;
-  font-family: var(--font-mono);
+/* ---------- 表单视图的表格（list / dict）----------
+   列：序号 | 值 |（dict 还有键）| 操作；行内操作是纯图标按钮。 */
+.grid {
+  width: 100%;
+  border-collapse: collapse;
 }
-.valueInput {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px;
-  align-items: start;
-  gap: 6px;
-}
-.item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 0;
+.grid th,
+.grid td {
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
 }
-.itemHead {
-  display: flex;
-  justify-content: space-between;
+.grid th {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.grid tbody tr:last-child td {
+  border-bottom: 0;
+}
+.gridNo {
+  width: 40px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.gridOps {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+/* dict 未编辑时的只读单元格：保留换行、长内容自动断行 */
+.cellText {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* 正在编辑的 dict 行 */
+.rowEditing {
+  background: var(--surface-2);
+}
+/* 行内纯图标按钮 */
+.iconBtn {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  vertical-align: middle;
 }
-.newItem {
+.iconBtn + .iconBtn {
+  margin-left: 2px;
+}
+.iconBtn:hover {
+  background: var(--nav-hover-bg);
+  color: var(--text-1);
+}
+.iconDanger:hover {
+  color: var(--danger);
+  border-color: var(--border-strong);
+}
+/* 过滤输入框：与「新增 / 清空」并排，占满剩余宽度（覆盖 .control 的 100%） */
+.filter {
+  flex: 1 1 220px;
+  width: auto;
+  min-width: 0;
+}
+.viewTabs {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 16px;
+  align-items: stretch;
+  height: 100%;
+  gap: 2px;
+}
+.viewTabs button {
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.viewTabs button:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+.viewTabs button.tabActive {
+  color: var(--text-1);
+  border-bottom-color: var(--accent);
+}
+
+/* 顶栏标题旁的类型徽标 */
+.typeBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.6;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-2);
+  vertical-align: 1px;
+}
+
+/* 状态栏里的未保存标记 */
+.dirty {
+  color: var(--warning, var(--text-2));
 }

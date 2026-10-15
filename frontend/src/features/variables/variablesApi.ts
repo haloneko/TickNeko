@@ -6,9 +6,13 @@
  * - 变量按作用域分两档：`graph`（图级，只有这张图看得见）/ `account`（账号级，同账号共享）；
  * - 非管理员后端强制只看自己的 owner_id，指定别人会 403 —— 所以普通用户不传 owner_id；
  * - 列表接口只列元数据：value/data/length 为空，看内容走 /variables/value（viewVariable）；
+ * - 新建走 `POST /variables`（createVariable）：只登记类型、本体先空着，值随后用 addVariable 写；
  * - 缓存没接入时后端回 503（变量全在缓存里，没有它答不了）。
  */
 import { http } from '../../lib/http'
+import { createVariableParams, type VariableDraft } from './variableEdits'
+
+export type { VariableDraft }
 
 /** 变量作用域（后端口径）。顺序即界面下拉顺序。 */
 export const VARIABLE_SCOPES = ['graph', 'account'] as const
@@ -66,6 +70,30 @@ export function listVariables(params: VariableSearchParams = {}) {
 
 /** 修改字段由节点查看器定义；扩展字段完整交给服务端校验。 */
 export type VariableMutation = Record<string, unknown>
+
+/** 一种**能手工新建**的变量类型（GET /variables/types）：type_id 就是新建时要提交的类型。 */
+export interface VariableTypeOption {
+  type_id: string
+  /** 类型的中文名（查看器注册的，如「文本」「字典」「列表·计数」） */
+  label: string
+  /** 界面展示类型：前端按它挑渲染器 */
+  view_type: string
+}
+
+/** 能新建哪些类型由后端说了算（只列建完能直接编辑的），前端不抄一份。 */
+export function listVariableTypes() {
+  return http.get<VariableTypeOption[]>('/variables/types')
+}
+
+/**
+ * 新建一个逻辑变量：只登记类型，本体先空着（空值不是 404，随后照常查看与编辑）。
+ *
+ * 变量名即身份：同名（已有本体 / 已登记类型 / 已被图里的节点声明）后端回 409，不覆盖 ——
+ * 想换类型先删除。
+ */
+export function createVariable(draft: VariableDraft) {
+  return http.post<VariableEntry>(`/variables?${createVariableParams(draft)}`)
+}
 
 function variableIdentity(entry: VariableEntry): Record<string, string> {
   return entry.scope === 'account'

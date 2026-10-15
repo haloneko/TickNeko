@@ -5,6 +5,7 @@
  * - 作用域分两档：图级（只有某一张图看得见）/ 账号级（同一账号的工作流共享）；
  * - **权限在服务端**：管理员看得到所有人的变量，可以用归属下拉筛到某一个人；
  *   普通用户后端强制只返回自己名下的，界面上直接不露出归属那一项 —— 前端不做「假权限」。
+ * - 页头「新增变量」走 `VariableCreateDialog`：只建「名字 + 类型」的空变量，值随后在行内编辑；
  *
  * 数据全部来自后端真实检索，前端不造一条变量：查不到就空态，接口挂了就错误态。
  * 筛选（作用域 / 变量名 / 归属）点「查询」才生效，避免边打边请求。
@@ -25,13 +26,14 @@ import { ApiRequestError } from '../../lib/http'
 import { useAuth } from '../auth/authStore'
 import OwnerFilter, { ownerName } from '../../common/OwnerFilter'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
-import { IconRefresh, IconTrash, IconVariables } from '../../common/icons'
+import { IconPlus, IconRefresh, IconTrash, IconVariables } from '../../common/icons'
 import { ListSkeleton } from '../../common/Skeleton'
 import ErrorBox from '../../common/ErrorBox'
 import { usePagedQuery } from '../../common/usePagedQuery'
 import { useToast } from '../../common/Toast'
 import Pagination from '../../common/Pagination'
 import styles from './VariablesPage.module.css'
+import VariableCreateDialog from './VariableCreateDialog'
 import VariableValueViewer from './VariableValueViewer'
 
 /** 每页条数可选项（后端单次上限 500）。 */
@@ -73,6 +75,9 @@ export default function VariablesPage() {
   /** 待删除的变量：非空就弹确认框（破坏性操作统一走 ConfirmDialog） */
   const [pendingDelete, setPendingDelete] = useState<VariableEntry | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  /** 新增变量弹窗：开关 + 建好后的提示与刷新 */
+  const [createOpen, setCreateOpen] = useState(false)
 
   // 表单草稿（输入中）与已生效查询（点「查询」后才同步）
   const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS)
@@ -163,6 +168,10 @@ export default function VariablesPage() {
           </p>
         </div>
         <div className={styles.headActions}>
+          <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
+            <IconPlus size={15} />
+            新增变量
+          </button>
           <button
             type="button"
             className="btn"
@@ -265,7 +274,9 @@ export default function VariablesPage() {
                 </thead>
                 <tbody>
                   {query.items.map((entry) => (
-                    <tr key={`${entry.scope}:${entry.owner_id}:${entry.workflow_id}:${entry.key}`}>
+                    <tr
+                      key={`${entry.scope}:${entry.owner_id}:${entry.workflow_id}:${entry.key}`}
+                    >
                       <td>
                         <span className={styles.scopeBadge} data-scope={entry.scope}>
                           {SCOPE_LABELS[entry.scope] ?? entry.scope}
@@ -344,6 +355,18 @@ export default function VariablesPage() {
           </>
         )}
       </section>
+
+      {/* 新增变量：只建名字 + 类型（值随后在行内点「编辑」填），建好了静默刷新列表 */}
+      {createOpen && (
+        <VariableCreateDialog
+          onClose={() => setCreateOpen(false)}
+          onCreated={(key) => {
+            setCreateOpen(false)
+            pushToast('success', `已新建变量「${key}」，点「编辑」填值`)
+            void query.refresh(true)
+          }}
+        />
+      )}
 
       {/* 删除不可逆：统一走确认弹窗 */}
       {pendingDelete && (

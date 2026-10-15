@@ -35,6 +35,7 @@ __all__ = [
     "VariableViewType",
     "VariableViewer",
     "get_variable_viewer",
+    "node_variable_viewers",
     "register_variable_viewer",
     "registered_variable_viewers",
     "text_parameter",
@@ -143,10 +144,16 @@ class VariableView:
 #: ``type_id`` -> 查看器类：变量类型**由节点注册**，用户目录里存的就是这个 id
 _VIEWERS_BY_TYPE: dict[str, type[VariableViewer]] = {}
 
+_NODE_VIEWER_TYPES: set[str] = set()
 
-def register_variable_viewer(viewer: type[VariableViewer]) -> None:
+
+def register_variable_viewer(
+    viewer: type[VariableViewer], *, used_by_node: bool = False
+) -> None:
     """登记一种变量类型（``viewer.type_id`` 唯一）。
 
+    :param used_by_node: 这一种**有节点在用**（节点注册执行器时带上查看器即为真）。
+        它只影响「能不能手工新建」：没人维护的类型建出来也没人写，不列入可建名单。
     :raises ValueError: 不是 :class:`VariableViewer` 子类，或 ``type_id`` 已被**别的**类占。
     """
     if not issubclass(viewer, VariableViewer):
@@ -158,11 +165,21 @@ def register_variable_viewer(viewer: type[VariableViewer]) -> None:
             f"{viewer.__qualname__} 不能重复占用"
         )
     _VIEWERS_BY_TYPE[viewer.type_id] = viewer
+    if used_by_node:
+        _NODE_VIEWER_TYPES.add(viewer.type_id)
 
 
 def registered_variable_viewers() -> tuple[type[VariableViewer], ...]:
     """已登记的变量类型（按 ``type_id`` 排序）。"""
     return tuple(_VIEWERS_BY_TYPE[key] for key in sorted(_VIEWERS_BY_TYPE))
+
+
+def node_variable_viewers() -> tuple[type[VariableViewer], ...]:
+    return tuple(
+        _VIEWERS_BY_TYPE[type_id]
+        for type_id in sorted(_NODE_VIEWER_TYPES)
+        if type_id in _VIEWERS_BY_TYPE
+    )
 
 
 def get_variable_viewer(type_id: str) -> type[VariableViewer] | None:

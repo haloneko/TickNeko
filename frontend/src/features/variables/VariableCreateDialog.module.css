@@ -1,0 +1,56 @@
+/* 「新增变量」弹窗的表单样式：label 在上、控件在下，观感与机器人页那套一致。
+   颜色全部走设计令牌，明 / 暗主题自动适配。 */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.label {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.control {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-1);
+  font-size: 13px;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.control:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.control:disabled {
+  opacity: 0.6;
+}
+/* 选项读不出来时（后端没接 / 请求失败）的说明：别让人对着空下拉猜 */
+.hint {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-3);
+}
+.error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}

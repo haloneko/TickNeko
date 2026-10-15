@@ -83,6 +83,22 @@ class VariableSummary(BaseModel):
         )
 
 
+class VariableTypeItem(BaseModel):
+    """一种**能手工新建**的变量类型（新建表单的类型下拉用）。
+
+    只列注册表里 ``probe_editable`` 的类型：建出来就能直接编辑，不会建完改不动。
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    #: 变量类型 id（节点注册的那种语义，登记进用户目录）；新建时原样提交回来
+    type_id: str = Field(description="变量类型 id")
+    #: 查看器注册的中文名，如「文本」「字典」「列表·计数」
+    label: str = Field(default="", description="类型的中文名")
+    #: 界面展示类型：前端按它挑渲染器
+    view_type: VariableViewType = Field(description="展示类型：str / json / list / dict")
+
+
 class VariablePage(BaseModel):
     """变量列表的**一页**：本页条目 + 命中总数（前端据此算总页数、做页码跳转）。"""
 
