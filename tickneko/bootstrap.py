@@ -139,9 +139,6 @@ def _router_for(kind: str) -> tuple[MessageRouter | EventRouter, bool] | None:
 
 def _trigger_data(event: PlatformEvent) -> dict[str, object]:
     """PlatformEvent -> 路由认的普通数据（消息 / 事件共用一份形状，全量平铺）。
-
-    消息流认 ``message``、事件流认 ``event_type`` / ``text``，各自只读自己的键；
-    ``target`` 是会话定位（回程地址），没有会话指向的事件是 ``None``。
     """
     return {
         "event_type": event.event_type,
