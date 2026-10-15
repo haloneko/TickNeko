@@ -133,7 +133,12 @@ class _DuckAdapter:
     async def stop(self) -> None:
         return None
 
-    def clients(self, *, owner_id: str | None = None) -> tuple[BotClient, ...]:
+    def clients(
+        self,
+        *,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+    ) -> tuple[BotClient, ...]:
         return ()
 
     async def send(self, owner_id: str, action: str, /, **params: object) -> ActionResult:
@@ -183,10 +188,15 @@ class _FakeAdapter:
     async def stop(self) -> None:
         self.stopped += 1
 
-    def clients(self, *, owner_id: str | None = None) -> tuple[BotClient, ...]:
-        if owner_id is None:
+    def clients(
+        self,
+        *,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+    ) -> tuple[BotClient, ...]:
+        if owner_id is None and bot_id is None:
             return self._online
-        return tuple(c for c in self._online if c.owner_id == owner_id)
+        return tuple(c for c in self._online if c.owner_id == (bot_id or owner_id))
 
     async def send(self, owner_id: str, action: str, /, **params: object) -> ActionResult:
         self.calls.append((owner_id, action, params))

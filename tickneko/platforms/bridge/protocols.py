@@ -32,11 +32,16 @@ class BotAdapter(Protocol):
         """停止：关监听并断开所有客户端（幂等）。"""
         ...
 
-    def clients(self, *, owner_id: str | None = None) -> tuple[BotClient, ...]:
-        """在线列表快照；给 ``owner_id`` 就只看那个归属下的。
+    def clients(
+        self,
+        *,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+    ) -> tuple[BotClient, ...]:
+        """在线列表快照；给 ``owner_id`` 只看那个归属下的、给 ``bot_id`` 只看那台机器人下的。
 
         快照口径与 :meth:`OneBotServer.roster <tickneko.platforms.onebot.server.OneBotServer.roster>`
-        一致：取那一刻的样子，不代表此刻还连着。
+        一致：取那一刻的样子，不代表此刻还连着。在线状态按**机器人**（bot_id）算，不按归属。
         """
         ...
 

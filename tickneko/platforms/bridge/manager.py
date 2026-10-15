@@ -140,7 +140,7 @@ class _OneBotLifecycle:
     def online_clients(self, record) -> tuple[BotClient, ...]:
         if self._adapter is None:
             return ()
-        return self._adapter.clients(owner_id=record.owner_id)
+        return self._adapter.clients(bot_id=record.id)
 
 
 class _KookLifecycle:
@@ -201,8 +201,8 @@ class _KookLifecycle:
     def online_clients(self, record) -> tuple[BotClient, ...]:
         if self._adapter is None:
             return ()
-        # Kook 的 clients() 过滤键是 bot_id（record.id），不是归属用户
-        return self._adapter.clients(owner_id=record.id)
+        # 过滤键是 bot_id（record.id），不是归属用户
+        return self._adapter.clients(bot_id=record.id)
 
     async def _ensure_client(self, bot_id: str) -> None:
         """保证 Kook 适配器里有这个机器人的客户端：没有就解密 Bot Token 后登记。

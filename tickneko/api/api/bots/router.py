@@ -186,6 +186,7 @@ async def set_bot_enabled(
     changed = await service.set_enabled(bot_id, payload.enabled)
     if not changed:
         raise ApiError(ErrorCode.HTTP_ERROR, "没有这个机器人", status_code=status.HTTP_404_NOT_FOUND)
+    record = await service.get_by_id(bot_id) or record
     nickname = await _nickname_of(users, record.owner_id)
     clients = service.online_clients(record)
     return ApiResponse[BotData](

@@ -57,12 +57,17 @@ class _FakeKookAdapter:
         self.removed.append(bot_id)
         self.registered.pop(bot_id, None)
 
-    def clients(self, *, owner_id: str | None = None) -> tuple[BotClient, ...]:
-        return self.online.get(owner_id or "", ())
+    def clients(
+        self,
+        *,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+    ) -> tuple[BotClient, ...]:
+        return self.online.get(bot_id or owner_id or "", ())
 
 
 class _FakeOneBotAdapter:
-    """假 OneBot 适配器：启停 / 删走服务端（透传记录 id），在线按归属取。"""
+    """假 OneBot 适配器：启停 / 删走服务端（透传记录 id），在线按 bot_id 取。"""
 
     def __init__(self) -> None:
         self.enabled_calls: list[tuple[str, bool]] = []
@@ -81,8 +86,13 @@ class _FakeOneBotAdapter:
         self.revoked.append(token_id)
         return True
 
-    def clients(self, *, owner_id: str | None = None) -> tuple[BotClient, ...]:
-        return self.online.get(owner_id or "", ())
+    def clients(
+        self,
+        *,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+    ) -> tuple[BotClient, ...]:
+        return self.online.get(bot_id or owner_id or "", ())
 
 
 async def test_kook_issue_registers_and_starts_client(store: SqlBotStore) -> None:
@@ -133,22 +143,25 @@ async def test_onebot_lifecycle_delegates_to_server(store: SqlBotStore) -> None:
 
 
 async def test_online_clients_by_platform(store: SqlBotStore) -> None:
-    """在线列表口径交给平台：OneBot 按归属（owner_id）取，Kook 按 bot_id 取。"""
+    """在线列表按机器人（bot_id）隔离：同归属下只有连上那台显示在线。"""
     kook = _FakeKookAdapter()
     onebot = _FakeOneBotAdapter()
     manager = BotManager(store, onebot=onebot, kook=kook, secret_key="test-secret")
 
     kook_bot = await manager.issue("u-admin", platform="kook", token="k")
-    onebot_bot = await manager.issue("u-admin", platform="onebot")
+    onebot_a = await manager.issue("u-admin", platform="onebot")
+    onebot_b = await manager.issue("u-admin", platform="onebot")  # 同归属、没连
 
     row = BotClient(client_id="c-1", owner_id="u-admin", self_id="bot")
     kook.online[kook_bot.record.bot_id] = (row,)
-    onebot.online["u-admin"] = (row,)
+    onebot.online[onebot_a.record.bot_id] = (row,)
 
     kook_record = await manager.get_by_id(kook_bot.record.bot_id)
-    onebot_record = await manager.get_by_id(onebot_bot.record.bot_id)
+    onebot_a_record = await manager.get_by_id(onebot_a.record.bot_id)
+    onebot_b_record = await manager.get_by_id(onebot_b.record.bot_id)
     assert manager.online_clients(kook_record) == (row,)  # kook 按 bot_id
-    assert manager.online_clients(onebot_record) == (row,)  # onebot 按 owner_id
+    assert manager.online_clients(onebot_a_record) == (row,)  # onebot 按 bot_id
+    assert manager.online_clients(onebot_b_record) == ()  # 同归属没连那台不显示在线
 
 
 async def test_no_adapter_falls_back_to_store_only(store: SqlBotStore) -> None:
