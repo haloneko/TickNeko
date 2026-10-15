@@ -1,7 +1,7 @@
 /** 按查看器展示类型渲染、编辑和调用 add；保存后重新读取，失败保留草稿。
  * 列表行只带元信息（不读本体值），点「查看 / 编辑」打开弹窗时才拉详情。 */
 import { useMemo, useRef, useState } from 'react'
-import { Modal } from '../../common/Modal'
+import { FullscreenDialog } from '../../common/FullscreenDialog'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { JsonEditor, type JsonEditorHandle } from '../../common/JsonEditor'
 import { ApiRequestError } from '../../lib/http'
@@ -364,14 +364,36 @@ export default function VariableValueViewer({
         )}
       </div>
       {open && (
-        <Modal
-          title={`变量 · ${entry.key}`}
-          busy={busy}
-          onClose={() => {
-            if (dirty && current.editable) setPendingClose(true)
-            else setOpen(false)
-          }}
-          footer={
+        <FullscreenDialog
+          title={
+            <>
+              变量 · {entry.key}
+              {current.type && (
+                <span className={styles.typeBadge}>{typeLabel(current)}</span>
+              )}
+            </>
+          }
+          tabs={
+            current.editable && (current.type === 'list' || current.type === 'dict') ? (
+              <div className={styles.viewTabs}>
+                <button
+                  type="button"
+                  className={viewMode === 'form' ? styles.tabActive : undefined}
+                  onClick={toFormView}
+                >
+                  表单
+                </button>
+                <button
+                  type="button"
+                  className={viewMode === 'json' ? styles.tabActive : undefined}
+                  onClick={toJsonView}
+                >
+                  JSON
+                </button>
+              </div>
+            ) : undefined
+          }
+          actions={
             <>
               <button
                 type="button"
@@ -379,8 +401,22 @@ export default function VariableValueViewer({
                 disabled={busy || dirty}
                 onClick={() => void load()}
               >
-                重新读取
+                刷新
               </button>
+              {(current.type === 'json' ||
+                (viewMode === 'json' && (current.type === 'list' || current.type === 'dict'))) && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => {
+                    if (current.type === 'json') jsonTypeRef.current?.format()
+                    else jsonViewRef.current?.format()
+                  }}
+                >
+                  格式化
+                </button>
+              )}
               {current.editable && (
                 <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>
                   {busy ? '提交中…' : '保存'}
@@ -388,87 +424,78 @@ export default function VariableValueViewer({
               )}
             </>
           }
-        >
-          {busy && (
-            <p className={styles.hint} role="status">
-              正在读取或保存…
-            </p>
-          )}
-          {error && (
-            <p className={styles.error} role="alert">
-              {error}
-            </p>
-          )}
-          {notice && <p role="status">{notice}</p>}
-          {current.type && (
-            <p className={styles.hint}>
-              {typeLabel(current)}
-              {current.type === 'list' && current.length !== null
-                ? ` · 当前 ${current.length} 项`
-                : ''}
-            </p>
-          )}
-          {!current.editable ? (
+          status={
             <>
+              {current.type && (
+                <span>
+                  {typeLabel(current)}
+                  {current.type === 'list' && current.length !== null
+                    ? ` · 当前 ${current.length} 项`
+                    : ''}
+                </span>
+              )}
+              {dirty && <span className={styles.dirty}>● 未保存</span>}
+              {busy && <span role="status">处理中…</span>}
+              {notice && <span role="status">{notice}</span>}
+              {error && (
+                <span className={styles.error} role="alert">
+                  {error}
+                </span>
+              )}
+            </>
+          }
+          busy={busy}
+          onClose={() => {
+            if (dirty && current.editable) setPendingClose(true)
+            else setOpen(false)
+          }}
+        >
+          {!current.editable ? (
+            <div className={styles.padded}>
               <p className={styles.hint}>{current.reason}</p>
               <Preview entry={current} expanded />
-            </>
+            </div>
           ) : (
-            <fieldset disabled={busy} className={styles.editor}>
+            // 纯编辑器（str / json / list·dict 的 JSON 视图）铺满全屏；表单视图留白
+            <fieldset
+              disabled={busy}
+              className={`${styles.editor}${
+                viewMode === 'form' && (current.type === 'list' || current.type === 'dict')
+                  ? ` ${styles.padded}`
+                  : ''
+              }`}
+            >
               {current.type === 'str' && (
-                <textarea
-                  className={styles.control}
-                  aria-label="变量值"
-                  rows={8}
+                <JsonEditor
                   value={text}
-                  onChange={(event) => {
-                    setText(event.target.value)
+                  onChange={(value) => {
+                    setText(value)
                     edited()
                   }}
+                  ariaLabel="变量值"
+                  mode="text"
+                  minHeight={260}
                 />
               )}
               {current.type === 'json' && (
-                <>
-                  <JsonEditor
-                    ref={jsonTypeRef}
-                    value={text}
-                    onChange={(value) => {
-                      setText(value)
-                      edited()
-                    }}
-                    ariaLabel="变量 JSON"
-                  />
-                  <div className={styles.toolbar}>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => jsonTypeRef.current?.format()}
-                    >
-                      格式化
-                    </button>
-                  </div>
-                </>
-              )}
-              {(current.type === 'list' || current.type === 'dict') && (
-                <div className={styles.viewSwitch}>
-                  <button
-                    type="button"
-                    className={viewMode === 'form' ? styles.active : undefined}
-                    onClick={toFormView}
-                  >
-                    表单
-                  </button>
-                  <button
-                    type="button"
-                    className={viewMode === 'json' ? styles.active : undefined}
-                    onClick={toJsonView}
-                  >
-                    JSON
-                  </button>
-                </div>
+                <JsonEditor
+                  ref={jsonTypeRef}
+                  value={text}
+                  onChange={(value) => {
+                    setText(value)
+                    edited()
+                  }}
+                  ariaLabel="变量 JSON"
+                  minHeight={460}
+                />
               )}
               {viewMode === 'json' && (current.type === 'list' || current.type === 'dict') && (
                 <>
+                  {jsonError && (
+                    <p className={styles.error} role="alert">
+                      {jsonError}
+                    </p>
+                  )}
                   <JsonEditor
                     ref={jsonViewRef}
                     value={jsonText}
@@ -478,21 +505,8 @@ export default function VariableValueViewer({
                       edited()
                     }}
                     ariaLabel="变量 JSON"
+                    minHeight={460}
                   />
-                  <div className={styles.toolbar}>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => jsonViewRef.current?.format()}
-                    >
-                      格式化
-                    </button>
-                    {jsonError && (
-                      <span className={styles.error} role="alert">
-                        {jsonError}
-                      </span>
-                    )}
-                  </div>
                 </>
               )}
               {viewMode === 'form' && (current.type === 'list' || current.type === 'dict') && (
@@ -643,7 +657,7 @@ export default function VariableValueViewer({
               )}
             </fieldset>
           )}
-        </Modal>
+        </FullscreenDialog>
       )}
       {pendingClose && (
         <ConfirmDialog

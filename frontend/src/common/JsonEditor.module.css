@@ -1,13 +1,31 @@
+/* 编辑器自适应填满父容器：外层是 flex 列（body → fieldset → .editor → .host），
+   CodeMirror 沿链路 flex:1 撑满剩余高度；内容超高时由 .cm-scroller 内部滚动。
+   全屏编辑区不描边、不画焦点框：既铺满容器，也避免「一编辑就冒出蓝框」。 */
+.editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
 .editor :global(.cm-editor) {
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface-1);
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  background: var(--surface);
   overflow: hidden;
 }
-.editor :global(.cm-editor.cm-focused) {
-  border-color: var(--primary, var(--border-strong));
+/* 自定义边框与浏览器默认 focus ring 一并去掉，编辑时不出现任何外框。 */
+.editor :global(.cm-editor.cm-focused),
+.editor :global(.cm-scroller),
+.editor :global(.cm-content) {
   outline: none;
 }
 .editor :global(.cm-scroller) {
-  max-height: 420px;
+  flex: 1 1 auto;
 }

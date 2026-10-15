@@ -47,6 +47,14 @@
   margin: 0;
   padding: 0;
   min-width: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.padded {
+  padding: 20px 24px 32px;
 }
 .control {
   box-sizing: border-box;
@@ -88,25 +96,47 @@ textarea.control {
   gap: 8px;
   margin-top: 16px;
 }
-.viewSwitch {
-  display: inline-flex;
-  gap: 4px;
-  margin-bottom: 10px;
+.viewTabs {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  gap: 2px;
 }
-.viewSwitch button {
-  padding: 5px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface-2);
+.viewTabs button {
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
   color: var(--text-2);
-  cursor: pointer;
   font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
 }
-.viewSwitch button:hover {
-  border-color: var(--border-strong);
-}
-.viewSwitch button.active {
-  background: var(--surface-1);
+.viewTabs button:hover {
   color: var(--text-1);
-  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+.viewTabs button.tabActive {
+  color: var(--text-1);
+  border-bottom-color: var(--accent);
+}
+
+/* 顶栏标题旁的类型徽标 */
+.typeBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.6;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-2);
+  vertical-align: 1px;
+}
+
+/* 状态栏里的未保存标记 */
+.dirty {
+  color: var(--warning, var(--text-2));
 }
