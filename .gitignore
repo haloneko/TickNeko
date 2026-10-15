@@ -36,6 +36,8 @@ venv/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+# esbuild 构建临时目录（Windows Temp 被占时用工作区内目录跑构建的产物）
+frontend/.esbuild-tmp/
 # tsc 增量构建缓存（npx tsc -b 的产物）
 frontend/*.tsbuildinfo
 # Vite 本地环境覆盖（含本机后端地址等，只在各自机器上生效）
