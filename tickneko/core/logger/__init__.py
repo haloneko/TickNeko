@@ -18,6 +18,9 @@ from .manager import configure, manager
 from .base import BaseLogger, BoundLogger, ChildLogger
 from .core import LogCore
 
+#: 任何日志实例（root / child / bound 视图）——形参要收日志就标它，省得各处写 union
+LoggerLike = BaseLogger | BoundLogger | ChildLogger
+
 # ---- 处理器（可挂到核心上）----
 from .processors import (
     BaseLogProcessor,
@@ -51,6 +54,7 @@ __all__ = [
     "BaseLogger",
     "BoundLogger",
     "ChildLogger",
+    "LoggerLike",
     # 处理器
     "BaseLogProcessor",
     "ConsoleLogProcessor",

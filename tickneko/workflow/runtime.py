@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from tickneko.core.cache import cache as process_cache
-from tickneko.core.logger import BaseLogger, BoundLogger
+from tickneko.core.logger import BoundLogger, LoggerLike
 from tickneko.core.scheduler import TaskManager
 from tickneko.variables import VariableCenter
 
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 variable_center = VariableCenter(process_cache)
 
 
-def _log() -> BaseLogger | BoundLogger:
+def _log() -> LoggerLike:
     """取本模块的日志实例：**用到才取**，不要在模块级取。
 
     模块级 ``_logger = workflow_logger()`` 是**导入即执行**的：谁先 import 这个模块，谁就
@@ -44,7 +44,7 @@ def _log() -> BaseLogger | BoundLogger:
 
 
 def _log_run_failure(
-    logger: BaseLogger | BoundLogger,
+    logger: LoggerLike,
     message: str,
     exc: BaseException,
     **fields: object,
@@ -588,7 +588,7 @@ async def load_published_workflows(
     归属：开头 / 结尾这两条是**跨所有工作流**的全局事件，归公共；单条工作流的事（载入失败的
     error、开始节点那几条）挂在它自己的 ``owner_id`` 名下。
     """
-    log: BaseLogger | BoundLogger = _log()
+    log: LoggerLike = _log()
     primed = 0  # 登记到的开始节点数
     registered = 0  # 真正登记上的工作流条数
     disabled = 0  # 已发布但开关关着：跳过

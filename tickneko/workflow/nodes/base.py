@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from tickneko.core.cache import cache as process_cache
-from tickneko.core.logger import BaseLogger, BoundLogger, ChildLogger
+from tickneko.core.logger import LoggerLike
 from tickneko.core.scheduler import TaskManager
 
 from ...variables import VariableCenter, VariableKey, VariableViewer
@@ -312,7 +312,7 @@ class NodeExecutionContext:
     def __init__(
         self,
         *,
-        logger: BaseLogger | None = None,
+        logger: LoggerLike | None = None,
         scheduler: TaskManager | None = None,
         run: Callable[[], Awaitable[None]] | None = None,
         workflow_id: str = NO_WORKFLOW_ID,
@@ -344,22 +344,22 @@ class NodeExecutionContext:
         self.variables: VariableCenter = (
             variables if variables is not None else VariableCenter(self.cache)
         )
-        base: BaseLogger | ChildLogger | BoundLogger = (
+        base: LoggerLike = (
             logger if logger is not None else workflow_logger()
         )
         # 日志**提前带好默认参数**：这一趟的身份（哪条工作流 / 谁的 / 给谁跑的）在构造上下文
         # 时就定了，之后每个节点写日志都自动带上，不用谁在调用点手抄一遍。三者都能 bind
         # （核心 / 层级节点 / 绑定视图），只有鸭子形状不带时才原样用。
-        self._logger: BaseLogger | ChildLogger | BoundLogger = (
+        self._logger: LoggerLike = (
             base.bind(workflow_id=workflow_id, owner_id=owner_id, user_id=user_id)
-            if isinstance(base, (BaseLogger, ChildLogger, BoundLogger))
+            if isinstance(base, LoggerLike)  # Python 3.10+ 的 isinstance 原生支持 union 类型
             else base
         )
         self._scheduler: TaskManager | None = scheduler
         self._run: Callable[[], Awaitable[None]] | None = run
 
     @property
-    def logger(self) -> BaseLogger | BoundLogger:
+    def logger(self) -> LoggerLike:
         """节点写业务日志用的实例：**默认字段已绑好**（工作流 / 归属 / 用户）。"""
         return self._logger
 
