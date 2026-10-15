@@ -88,3 +88,25 @@ textarea.control {
   gap: 8px;
   margin-top: 16px;
 }
+.viewSwitch {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.viewSwitch button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font: inherit;
+}
+.viewSwitch button:hover {
+  border-color: var(--border-strong);
+}
+.viewSwitch button.active {
+  background: var(--surface-1);
+  color: var(--text-1);
+  border-color: var(--border-strong);
+}

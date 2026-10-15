@@ -2,6 +2,7 @@
  * 列表行只带元信息（不读本体值），点「查看 / 编辑」打开弹窗时才拉详情。 */
 import { useRef, useState } from 'react'
 import { Modal } from '../../common/Modal'
+import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { ApiRequestError } from '../../lib/http'
 import {
   addVariable,
@@ -11,9 +12,13 @@ import {
   type VariableMutation,
 } from './variablesApi'
 import {
+  dictFromJson,
   dictPayload,
+  dictToJsonText,
   draftValue,
+  listFromJson,
   listPayload,
+  listToJsonText,
   parseValue,
   type FieldDraft,
   type ValueDraft,
@@ -157,6 +162,12 @@ export default function VariableValueViewer({
   const [fields, setFields] = useState<FieldDraft[]>([])
   const [newValue, setNewValue] = useState<ValueDraft>(emptyValue)
   const [newField, setNewField] = useState('')
+  // 双视图：list / dict 可在「逐项表单」与「整体 JSON」间切换，保存以最后编辑的视图为准
+  const [viewMode, setViewMode] = useState<'form' | 'json'>('form')
+  const [jsonText, setJsonText] = useState('')
+  const [jsonError, setJsonError] = useState('')
+  // 未保存草稿时点关闭，先弹确认再真正关
+  const [pendingClose, setPendingClose] = useState(false)
 
   function applySnapshot(snapshot: VariableEntry) {
     setCurrent(snapshot)
@@ -178,6 +189,9 @@ export default function VariableValueViewer({
     )
     setNewValue(emptyValue())
     setNewField('')
+    setViewMode('form')
+    setJsonText('')
+    setJsonError('')
     setDirty(false)
   }
 
@@ -245,10 +259,12 @@ export default function VariableValueViewer({
           void modify({ value: parseValue({ text, format: 'json' }) })
           break
         case 'list':
-          void modify(listPayload(items))
+          void modify(viewMode === 'json' ? { items: listFromJson(jsonText) } : listPayload(items))
           break
         case 'dict':
-          void modify(dictPayload(fields))
+          void modify(
+            viewMode === 'json' ? { fields: dictFromJson(jsonText) } : dictPayload(fields),
+          )
           break
       }
     } catch (err) {
@@ -256,14 +272,61 @@ export default function VariableValueViewer({
     }
   }
 
+  /** 表单 → JSON：以当前草稿为准生成文本，切过去继续改，不丢已做的修改。 */
+  function toJsonView() {
+    setJsonText(current.type === 'list' ? listToJsonText(items) : dictToJsonText(fields))
+    setJsonError('')
+    setViewMode('json')
+  }
+
+  /** JSON → 表单：先校验，JSON 无效就拦住并保留现场，避免草稿被错误内容覆盖。 */
+  function toFormView() {
+    try {
+      if (current.type === 'list') {
+        setItems(listFromJson(jsonText).map(draftValue))
+      } else {
+        setFields(
+          Object.entries(dictFromJson(jsonText)).map(([field, value]) => ({
+            field,
+            value: draftValue(value),
+          })),
+        )
+      }
+      setJsonError('')
+      setViewMode('form')
+    } catch (err) {
+      setJsonError(errorMessage(err))
+    }
+  }
+
+  /** 格式化重排 JSON；无效时行内报错，不动原文本。 */
+  function formatJson() {
+    try {
+      setJsonText(
+        JSON.stringify(parseValue({ text: jsonText, format: 'json' }), null, 2) ?? 'null',
+      )
+      setJsonError('')
+    } catch (err) {
+      setJsonError(errorMessage(err))
+    }
+  }
+
+  /** 新增元素 / 字段先进本地草稿，随保存一次全量提交（后端 `items`/`fields` 覆盖语义不变）。 */
   function add() {
     try {
       const value = parseValue(newValue)
-      if (current.type === 'list') void modify({ item: value })
-      else {
+      if (current.type === 'list') {
+        setItems((values) => [...values, draftValue(value)])
+      } else {
         if (!newField) throw new Error('字段名不能为空')
-        void modify({ field: newField, value })
+        if (fields.some((field) => field.field === newField)) {
+          throw new Error(`字段名重复：${newField}`)
+        }
+        setFields((values) => [...values, { field: newField, value: draftValue(value) }])
       }
+      setNewValue(emptyValue())
+      setNewField('')
+      edited()
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -291,7 +354,10 @@ export default function VariableValueViewer({
         <Modal
           title={`变量 · ${entry.key}`}
           busy={busy}
-          onClose={() => setOpen(false)}
+          onClose={() => {
+            if (dirty && current.editable) setPendingClose(true)
+            else setOpen(false)
+          }}
           footer={
             <>
               <button
@@ -348,7 +414,50 @@ export default function VariableValueViewer({
                   }}
                 />
               )}
-              {current.type === 'list' && (
+              {(current.type === 'list' || current.type === 'dict') && (
+                <div className={styles.viewSwitch}>
+                  <button
+                    type="button"
+                    className={viewMode === 'form' ? styles.active : undefined}
+                    onClick={toFormView}
+                  >
+                    表单
+                  </button>
+                  <button
+                    type="button"
+                    className={viewMode === 'json' ? styles.active : undefined}
+                    onClick={toJsonView}
+                  >
+                    JSON
+                  </button>
+                </div>
+              )}
+              {viewMode === 'json' && (current.type === 'list' || current.type === 'dict') && (
+                <>
+                  <textarea
+                    className={styles.control}
+                    aria-label="变量 JSON"
+                    rows={12}
+                    value={jsonText}
+                    onChange={(event) => {
+                      setJsonText(event.target.value)
+                      setJsonError('')
+                      edited()
+                    }}
+                  />
+                  <div className={styles.toolbar}>
+                    <button type="button" className="btn" onClick={formatJson}>
+                      格式化
+                    </button>
+                    {jsonError && (
+                      <span className={styles.error} role="alert">
+                        {jsonError}
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+              {current.type === 'list' && viewMode === 'form' && (
                 <>
                   {items.length === 0 && <p className={styles.hint}>空列表</p>}
                   {items.map((item, index) => (
@@ -392,7 +501,7 @@ export default function VariableValueViewer({
                   </div>
                 </>
               )}
-              {current.type === 'dict' && (
+              {current.type === 'dict' && viewMode === 'form' && (
                 <>
                   {fields.length === 0 && <p className={styles.hint}>空字典</p>}
                   {fields.map((field, index) => (
@@ -450,7 +559,7 @@ export default function VariableValueViewer({
                   </div>
                 </>
               )}
-              {(current.type === 'list' || current.type === 'dict') && (
+              {viewMode === 'form' && (current.type === 'list' || current.type === 'dict') && (
                 <div className={styles.newItem}>
                   <strong>{current.type === 'list' ? '新增元素' : '新增或修改字段'}</strong>
                   {current.type === 'dict' && (
@@ -464,16 +573,27 @@ export default function VariableValueViewer({
                   )}
                   <ValueInput value={newValue} label="新增值" onChange={setNewValue} />
                   <div className={styles.toolbar}>
-                    <button type="button" className="btn" disabled={dirty} onClick={add}>
+                    <button type="button" className="btn" onClick={add}>
                       新增
                     </button>
-                    {dirty && <span className={styles.hint}>请先保存当前修改，再新增</span>}
                   </div>
                 </div>
               )}
             </fieldset>
           )}
         </Modal>
+      )}
+      {pendingClose && (
+        <ConfirmDialog
+          title="放弃未保存的修改？"
+          body={<>关闭后草稿会丢弃，已保存的部分不受影响。</>}
+          confirmText="放弃修改"
+          onCancel={() => setPendingClose(false)}
+          onConfirm={() => {
+            setPendingClose(false)
+            setOpen(false)
+          }}
+        />
       )}
     </div>
   )
