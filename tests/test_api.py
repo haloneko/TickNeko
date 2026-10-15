@@ -68,6 +68,8 @@ from tickneko.core.logger import (  # noqa: E402
     configure,
     manager,
 )
+from tickneko.bots import SqlBotStore  # noqa: E402
+from tickneko.platforms.bridge.manager import BotManager  # noqa: E402
 from tickneko.wiring import wire_loggers  # noqa: E402
 
 #: 演示账号（见 tickneko.api.services.user.demo.DEMO_USERS）
@@ -1361,3 +1363,43 @@ class TestResponseModels:
         data = LoginData(token="t", expires_in=60, user={"id": "u", "account": "a"})  # type: ignore[arg-type]
         assert data.token_type == "bearer"
         assert data.user.roles == []  # 没给角色就是空列表，不是 None
+
+
+# ----------------------------------------------------------------------- 机器人管理
+async def test_bots_patch_returns_fresh_enabled() -> None:
+    """``PATCH /bots/{id}`` 的响应必须带**更新后**的 enabled，一次就到位。
+
+    曾经的 bug：响应用更新前取到的 record 快照回填，前端按响应替换卡片时
+    开关「按两次才变」（第一次回填旧值，第二次库里已翻才生效）。这里断言
+    同一次响应的值就是新值，顺带验证「再启用」也是单次到位。
+    """
+    engine = await _memory_engine()
+    store = SqlBotStore(engine)
+    await store.ensure_schema()
+    manager = BotManager(store, secret_key="test-secret")  # 适配器不传：启停只落库
+    async with client_for(
+        create_app(ApiOptions(prefix="/api"), db=engine, bots=manager, hasher=_TEST_HASHER)
+    ) as client:
+        token: str = (await client.post(LOGIN_PATH, json=ADMIN)).json()["data"]["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        added = await client.post(
+            "/api/bots",
+            headers=headers,
+            json={"platform": "onebot", "account": "10001", "remark": ""},
+        )
+        assert added.status_code == 200, added.text
+        bot_id: str = added.json()["data"]["record"]["id"]
+        assert added.json()["data"]["record"]["enabled"] is True
+
+        turned_off = await client.patch(
+            f"/api/bots/{bot_id}", headers=headers, json={"enabled": False}
+        )
+        assert turned_off.status_code == 200, turned_off.text
+        assert turned_off.json()["data"]["enabled"] is False  # 停用：一次到位
+
+        turned_on = await client.patch(
+            f"/api/bots/{bot_id}", headers=headers, json={"enabled": True}
+        )
+        assert turned_on.status_code == 200, turned_on.text
+        assert turned_on.json()["data"]["enabled"] is True  # 再启用：一次到位
