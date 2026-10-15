@@ -73,3 +73,38 @@ export function dictFromJson(text: string): Record<string, unknown> {
   }
   return parsed as Record<string, unknown>
 }
+
+/**
+ * 新建变量的请求草稿：作用域 + 变量名 + 类型，外加该作用域需要的定位字段。
+ *
+ * 账号级（`account`）归自己，`ownerId` 不传就由后端按当前登录用户填；
+ * 图级（`graph`）必须给 `workflowId` —— 变量总得挂在某一张图上。
+ */
+export interface VariableDraft {
+  scope: string
+  key: string
+  /** 变量类型 id（后端 `GET /variables/types` 下发的 `type_id`） */
+  typeId: string
+  /** 图级：挂在哪张图上 */
+  workflowId?: string
+  /** 账号级：归属者 id；不传 = 后端按当前登录用户 */
+  ownerId?: string
+}
+
+/**
+ * 新建请求的查询串：字段名即后端 query 参数名（scope / key / type_id，
+ * 图级再加 workflow_id，账号级可选 owner_id）—— 拼串只此一处，便于单测。
+ */
+export function createVariableParams(draft: VariableDraft): URLSearchParams {
+  const params = new URLSearchParams({
+    scope: draft.scope,
+    key: draft.key,
+    type_id: draft.typeId,
+  })
+  if (draft.scope === 'account') {
+    if (draft.ownerId) params.set('owner_id', draft.ownerId)
+  } else {
+    params.set('workflow_id', draft.workflowId ?? '')
+  }
+  return params
+}
