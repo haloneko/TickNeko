@@ -43,6 +43,7 @@ export const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(
     // 用 ref 保最新回调，编辑器实例只建一次，不随 onChange 重建
     const onChangeRef = useRef(onChange)
     onChangeRef.current = onChange
+    const syncingRef = useRef(false)
     // 模式只在首次挂载决定：str / json 是不同实例，挂载后不会切换
     const modeRef = useRef(mode)
     modeRef.current = mode
@@ -58,7 +59,9 @@ export const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(
           EditorView.lineWrapping,
           ...(isText ? [] : [lintGutter(), linter(jsonParseLinter()), json()]),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+            if (update.docChanged && !syncingRef.current) {
+              onChangeRef.current(update.state.doc.toString())
+            }
           }),
           EditorView.theme({
             '&': { minHeight: `${minHeight ?? 220}px` },
@@ -78,13 +81,19 @@ export const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(
       }
     }, [])
 
-    // 外部 value 变化（格式化、从视图切换回来）时同步进编辑器；本地刚打的字不覆盖
+    // 外部 value 变化（加载数据、保存后回显、从视图切换回来）时同步进编辑器；本地刚打的字不覆盖。
+    // 这次 dispatch 是程序回写，不算用户编辑 —— 回写期间挂 syncingRef，onChange 不回调
     useEffect(() => {
       const view = viewRef.current
       if (!view) return
       const current = view.state.doc.toString()
       if (current !== value) {
-        view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
+        syncingRef.current = true
+        try {
+          view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
+        } finally {
+          syncingRef.current = false
+        }
       }
     }, [value])
 
