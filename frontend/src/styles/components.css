@@ -17,9 +17,33 @@
     color 0.16s ease,
     border-color 0.16s ease;
 }
-.icon-btn:hover {
+/* hover 一律带 :not(:disabled) —— 禁用时不该有任何 hover 反馈，否则看着还能点。
+   这么写之后各变体只管自己的常态与 hover，不必再靠特异性互相压制。 */
+.icon-btn:hover:not(:disabled) {
   background: var(--nav-hover-bg);
   color: var(--text-1);
+}
+/* 禁用态与 .btn 同一口径（变淡 + 不给手型）；底色沿用各变体自己的常态 */
+.icon-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* 破坏性变体：与 .btn-danger-ghost 同口径 —— 静默为常（红字不红底），悬停才把红铺开 */
+.icon-btn-danger {
+  color: var(--danger);
+}
+.icon-btn-danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+/* 主操作变体：强调色实心，与 .btn-primary 同一视觉权重（右上角「新建」这类） */
+.icon-btn-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.icon-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--accent-contrast);
 }
 /* 键盘焦点环由 base.css 的全局 :focus-visible 统一提供 */
 
