@@ -299,6 +299,13 @@ export const IconEdit = (p: IconProps) => (
   </svg>
 )
 
+/** 重命名：文本光标（I 形）*/
+export const IconRename = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9 4.5h6M12 4.5v15M9 19.5h6" />
+  </svg>
+)
+
 export const IconArrowLeft = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -309,6 +316,14 @@ export const IconSave = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M5 4h11l3 3v13H5z" />
     <path d="M8 4v5h7V4M8 20v-6h8v6" />
+  </svg>
+)
+
+/** 发布：箭头从托盘里出栈 —— 「把这一版发出去」，与「保存」（存进版本库）分开。 */
+export const IconPublish = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 15.5V3.5M8 7.5l4-4 4 4" />
+    <path d="M4.5 14.5V19a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-4.5" />
   </svg>
 )
 

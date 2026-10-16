@@ -31,7 +31,6 @@ import {
   BADGE_H,
   PagerSkeleton,
   SkeletonBox,
-  SkeletonButton,
   SkeletonChip,
   SkeletonText,
   TEXT_H,
@@ -109,14 +108,14 @@ const COLUMNS: Column[] = [
     skeleton: () => <SkeletonText width={52} height={TEXT_H} />,
   },
   {
-    label: '操作',
-    width: 210,
+    label: '操作', 
+    width: 116,
     alignRight: true,
     skeleton: () => (
       <div className={styles.rowActions}>
-        {/* 查看器（「编辑 / 查看」两字）与删除（图标 + 两字）两个 .btn */}
-        <SkeletonButton width={60} />
-        <SkeletonButton width={82} />
+        {/* 占位就是按钮本身的尺寸（38 方形、--r-sm 圆角），不是默认那个 40/--r-md 的按钮占位 */}
+        <SkeletonBox size={38} radius="var(--r-sm)" />
+        <SkeletonBox size={38} radius="var(--r-sm)" />
       </div>
     ),
   },
@@ -251,18 +250,24 @@ export default function VariablesPage() {
           </p>
         </div>
         <div className={styles.headActions}>
-          <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-            <IconPlus size={15} />
-            新增变量
+          <button
+            type="button"
+            className="icon-btn icon-btn-primary"
+            onClick={() => setCreateOpen(true)}
+            title="新增变量"
+            aria-label="新增变量"
+          >
+            <IconPlus size={16} />
           </button>
           <button
             type="button"
-            className="btn"
+            className="icon-btn"
             onClick={() => query.refresh(false)}
             disabled={query.loading}
+            title="刷新"
+            aria-label="刷新"
           >
-            <IconRefresh size={15} className={query.loading ? styles.spin : undefined} />
-            刷新
+            <IconRefresh size={16} className={query.loading ? styles.spin : undefined} />
           </button>
         </div>
       </header>
@@ -420,13 +425,13 @@ export default function VariablesPage() {
                   )}
                   <button
                     type="button"
-                    className="btn btn-danger-ghost"
+                    className="icon-btn icon-btn-danger"
                     disabled={deleting}
                     title="删除这个变量"
+                    aria-label="删除变量"
                     onClick={() => setPendingDelete(entry)}
                   >
-                    <IconTrash size={14} />
-                    删除
+                    <IconTrash size={16} />
                   </button>
                 </div>
               </td>

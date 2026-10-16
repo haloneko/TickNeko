@@ -125,7 +125,7 @@ select.control {
    保证窄屏时列不会被压到内容溢出单元格；真放不下就由 .tableWrap 横向滚动。 */
 .table {
   width: 100%;
-  min-width: 1080px;
+  min-width: 986px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -232,12 +232,11 @@ select.control {
   color: var(--text-3);
 }
 
-/* 操作列：查看器 + 删除按钮右对齐排成一行 */
 .rowActions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 4px;
   white-space: nowrap;
 }
 .viewerCell {

@@ -22,7 +22,7 @@ import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { EmptyState } from '../../common/EmptyState'
 import {
   BADGE_H,
-  SkeletonButton,
+  SkeletonBox,
   SkeletonChip,
   SkeletonText,
   TEXT_H,
@@ -32,7 +32,9 @@ import TableFrame from '../../common/TableFrame'
 import {
   IconEdit,
   IconPlus,
+  IconPublish,
   IconRefresh,
+  IconRename,
   IconSettings,
   IconTrash,
 } from '../../common/icons'
@@ -61,14 +63,18 @@ function statusLabel(w: WorkflowData): { text: string; cls: string } {
 /* 占位高度（TEXT_H / BADGE_H）与表头都来自 common/Skeleton：变量页是同一套表格版式，
    两页共用一份「层高」与「列宽 + 表头」的机制，只有列配置各自保留。 */
 
-/** 操作列的 5 个按钮宽度：由 .btn 的 padding 16×2 + 文案 / 图标推得（编辑、设置、重命名、发布最新版、删除） */
-const ACTION_WIDTHS = [82, 82, 74, 100, 82]
+/* 操作列是 5 个纯图标按钮（编辑 / 设置 / 重命名 / 发布最新版 / 删除）。尺寸与间距不另立一套，
+   直接取公共 .icon-btn 与 .rowActions 的值，骨架就照这两个数铺 —— 按钮换了大小（原来是带
+   文案的 .btn，宽 74~100）骨架自动跟上，不会在骨架里留一份旧尺寸。 */
+const ACTIONS = 5
+const ACTION_ICON = 38 // .icon-btn 的边长
+const ACTION_GAP = 4 // .rowActions 的 gap
 
 /**
  * 表头列：真实表与骨架表共用同一份 —— 顺序 / 文案 / 列宽 / 骨架占位都不可能再漂移。
  * `width` 是列宽权重（各列之和 = .table 的 min-width），交给 TableColgroup 归一成百分比
  * 写进 `<col>`；配合 `.table` 的 `table-layout: fixed`，列宽就不再由内容决定：数据回来后
- * 既不换列宽，也不会被长名字 / 5 个按钮把表撑宽。权重取「表头 + 内边距 36」与真实内容
+ * 既不换列宽，也不会被长名字 / 5 个图标按钮把表撑宽。权重取「表头 + 内边距 36」与真实内容
  * 需要量的较大者；`skeleton(row)` 是这一列的占位，宽度按真实内容的量级取。
  */
 const COLUMNS: TableColumn[] = [
@@ -111,13 +117,14 @@ const COLUMNS: TableColumn[] = [
     skeleton: () => <SkeletonText width={104} height={TEXT_H} />,
   },
   {
-    label: '操作', // 5 个按钮 452（与 ACTION_WIDTHS 同）
-    width: 500,
+    label: '操作', // 5 个图标按钮 + 4 个间距 = 222，加单元格左右内边距 36
+    width: ACTIONS * ACTION_ICON + (ACTIONS - 1) * ACTION_GAP + 36,
     alignRight: true,
     skeleton: () => (
       <div className={styles.rowActions}>
-        {ACTION_WIDTHS.map((w, j) => (
-          <SkeletonButton key={j} width={w} />
+        {Array.from({ length: ACTIONS }).map((_, j) => (
+          // 占位就是按钮本身的尺寸（38 方形、--r-sm 圆角），不是默认那个 40/--r-md 的按钮占位
+          <SkeletonBox key={j} size={ACTION_ICON} radius="var(--r-sm)" />
         ))}
       </div>
     ),
@@ -238,9 +245,14 @@ export default function WorkflowPage() {
             搭配日志 / 测试等节点，校验通过后保存版本，发布即生效。
           </p>
         </div>
-        <button className="btn" onClick={() => void load()} disabled={loading}>
-          <IconRefresh size={15} />
-          刷新
+        <button
+          className="icon-btn"
+          onClick={() => void load()}
+          disabled={loading}
+          title="刷新"
+          aria-label="刷新"
+        >
+          <IconRefresh size={16} />
         </button>
       </header>
 
@@ -254,9 +266,14 @@ export default function WorkflowPage() {
           <div className={styles.panelActions}>
             <OwnerFilter owners={owners} value={ownerFilter} onChange={setOwnerFilter} />
             {canCreate && (
-              <button className="btn btn-primary" onClick={() => setCreating(true)}>
-                <IconPlus size={15} />
-                新建
+              // 这是主操作，所以用实心的 icon-btn-primary，不是幽灵那颗
+              <button
+                className="icon-btn icon-btn-primary"
+                onClick={() => setCreating(true)}
+                title="新建工作流"
+                aria-label="新建工作流"
+              >
+                <IconPlus size={16} />
               </button>
             )}
           </div>
@@ -355,46 +372,56 @@ export default function WorkflowPage() {
                 <td className={styles.muted}>{formatTime(w.updated_at)}</td>
                 <td>
                   <div className={styles.rowActions}>
+                    {/* 纯图标：文案进 title（悬停看）与 aria-label（读屏器听），
+                        两者都写 —— 只给 title 的话键盘 focus 与触屏都拿不到名字 */}
                     <button
-                      className="btn"
+                      className="icon-btn"
                       disabled={busy}
                       onClick={() => setEditingId(w.id)}
+                      title="编辑"
+                      aria-label="编辑"
                     >
-                      <IconEdit size={14} />
-                      编辑
+                      <IconEdit size={16} />
                     </button>
                     <button
-                      className="btn"
+                      className="icon-btn"
                       disabled={busy}
                       onClick={() => setSettingsFor(w)}
+                      title="设置"
+                      aria-label="设置"
                     >
-                      <IconSettings size={14} />
-                      设置
+                      <IconSettings size={16} />
                     </button>
                     <button
-                      className="btn"
+                      className="icon-btn"
                       disabled={busy || renameId === w.id}
                       onClick={() => {
                         setRenameId(w.id)
                         setRenameValue(w.name)
                       }}
+                      title="重命名"
+                      aria-label="重命名"
                     >
-                      重命名
+                      <IconRename size={16} />
                     </button>
                     <button
-                      className="btn"
+                      className="icon-btn"
                       disabled={busy || w.current_version === 0}
                       onClick={() => void publish(w.id)}
+                      // 灰着的时候说明为什么灰着（同「运行」开关那颗 title 的做法）
+                      title={w.current_version === 0 ? '还没有版本可发布' : '发布最新版'}
+                      aria-label="发布最新版"
                     >
-                      发布最新版
+                      <IconPublish size={16} />
                     </button>
                     <button
-                      className="btn btn-danger-ghost"
+                      className="icon-btn icon-btn-danger"
                       disabled={busy}
                       onClick={() => setConfirmId(w.id)}
+                      title="删除"
+                      aria-label="删除"
                     >
-                      <IconTrash size={14} />
-                      删除
+                      <IconTrash size={16} />
                     </button>
                   </div>
                 </td>

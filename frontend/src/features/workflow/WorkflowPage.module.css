@@ -48,12 +48,12 @@
   overflow-x: auto;
 }
 /* 列宽由表头（COLUMNS 的权重）决定，不由内容决定 —— 骨架表与真实表共用同一个表头，
-   于是两边的列宽逐像素相同：数据回来后既不换列宽，也不会为塞下长名字 / 5 个按钮变宽
+   于是两边的列宽逐像素相同：数据回来后既不换列宽，也不会为塞下长名字 / 5 个图标按钮变宽
    （长内容在各自单元格里截尾，悬停看全）。min-width 取各列权重之和，保证窄屏时列
    不会被压到内容溢出单元格。 */
 .table {
   width: 100%;
-  min-width: 1458px;
+  min-width: 1200px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -129,11 +129,14 @@
   color: var(--text-2);
 }
 
+/* 行内操作：5 个图标按钮。间隙比 .btn 那会儿紧一半 —— .icon-btn 的方框里已经留了
+   11px 空白（38 的框只放 16 的图标），再叠 8px 的 gap 看着就是一盘散珠。
+   这个 gap 同时决定操作列的宽度，改它要连 ACTION_GAP 与 .table 的 min-width 一起改。 */
 .rowActions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 4px;
 }
 /* 骨架表的「运行」单元格：铺开开关 + 文案的占位，间距对齐 .switch 的 gap */
 .skelSwitch {
