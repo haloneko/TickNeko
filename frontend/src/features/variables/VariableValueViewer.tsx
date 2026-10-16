@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 import { FullscreenDialog } from '../../common/FullscreenDialog'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { JsonEditor, type JsonEditorHandle } from '../../common/JsonEditor'
-import { IconCheck, IconCopy, IconEdit, IconPlus, IconTrash } from '../../common/icons'
+import { IconCheck, IconCopy, IconEdit, IconEye, IconPlus, IconTrash } from '../../common/icons'
 import { ApiRequestError } from '../../lib/http'
 import {
   addVariable,
@@ -373,14 +373,20 @@ export default function VariableValueViewer({
           那 8px 上下边距会把整行从 64 顶到 80.8；弹窗里那条仍用 toolbar */}
       <div className={`${styles.toolbar} ${styles.rowToolbar}`}>
         {entry.type && (
-          // 不可编辑时把整句原因收进 title：20+ 字摆在按钮旁边会折行，把行顶高
           <button
             type="button"
-            className="btn"
+            className="icon-btn"
             onClick={showEditor}
-            title={entry.editable ? undefined : entry.reason || undefined}
+            title={
+              entry.editable
+                ? '编辑'
+                : entry.reason
+                  ? `查看（不可编辑：${entry.reason}）`
+                  : '查看'
+            }
+            aria-label={entry.editable ? '编辑变量' : '查看变量'}
           >
-            {entry.editable ? '编辑' : '查看'}
+            {entry.editable ? <IconEdit size={16} /> : <IconEye size={16} />}
           </button>
         )}
       </div>
