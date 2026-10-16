@@ -27,6 +27,7 @@ import OwnerFilter from '../../common/OwnerFilter'
 import { useAuth } from '../auth/authStore'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { CardGridSkeleton } from '../../common/Skeleton'
+import LoadingRegion from '../../common/LoadingRegion'
 import { Modal } from '../../common/Modal'
 import {
   IconAlert,
@@ -230,9 +231,15 @@ export default function TokensPage() {
           <h3 className={styles.panelTitle}>令牌列表</h3>
           <OwnerFilter owners={owners} value={ownerFilter} onChange={setOwnerFilter} />
         </div>
-        {loading ? (
-          <CardGridSkeleton />
-        ) : (
+        {/* 卡片网格的加载 / 慢加载交给 LoadingRegion：
+            250ms 内不换内容（快请求不闪一屏卡片骨架），9s 后骨架停扫光并给重试。
+            这里没有「空态」——「添加机器人」入口卡永远在，网格不会被清空 */}
+        <LoadingRegion
+          loading={loading}
+          onRetry={() => void load()}
+          liveLabel="正在加载机器人列表…"
+          skeleton={<CardGridSkeleton />}
+        >
           <div className={styles.cardGrid}>
             {/* 添加机器人：与卡片同尺寸的入口（看别人的归属时不出现 —— 加了也是加到自己名下） */}
             {canCreate && (
@@ -343,7 +350,7 @@ export default function TokensPage() {
               </div>
             )}
           </div>
-        )}
+        </LoadingRegion>
       </section>
 
       {/* 添加机器人：签发表单弹窗（明文只在这次出现，先复制再关） */}

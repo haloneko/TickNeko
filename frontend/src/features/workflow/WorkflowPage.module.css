@@ -41,8 +41,20 @@
   min-width: 0;
 }
 
+/* 列表区是横向滚动容器：列宽一旦定死（.table 的 min-width = 各列权重之和），
+   窄屏就靠这里滚 —— 没有它，超出的部分会被 .panel 的 overflow: hidden 直接裁掉
+   （右侧「操作」看得见却点不到）。 */
+.tableWrap {
+  overflow-x: auto;
+}
+/* 列宽由表头（COLUMNS 的权重）决定，不由内容决定 —— 骨架表与真实表共用同一个表头，
+   于是两边的列宽逐像素相同：数据回来后既不换列宽，也不会为塞下长名字 / 5 个按钮变宽
+   （长内容在各自单元格里截尾，悬停看全）。min-width 取各列权重之和，保证窄屏时列
+   不会被压到内容溢出单元格。 */
 .table {
   width: 100%;
+  min-width: 1458px;
+  table-layout: fixed;
   border-collapse: collapse;
 }
 .table th {
@@ -64,6 +76,11 @@
 .table tr:last-child td {
   border-bottom: none;
 }
+/* 行淡入：骨架一撤、真实行直接「啪」地出现太生硬。动画挂在行上（新 key 会重建元素，
+   于是换归属筛选也是淡入）；prefers-reduced-motion 时被 base.css 全局压成瞬时。 */
+.table tbody tr {
+  animation: fade-in 0.24s var(--ease-out);
+}
 
 /* 面板头右侧：归属筛选 + 「新建」并排（筛选只有管理员看得到，普通用户它就整体不渲染） */
 .panelActions {
@@ -79,8 +96,12 @@
   white-space: nowrap;
   color: var(--text-2);
 }
+/* 名称：长名字截尾、悬停看全 —— 宽度由表头权重定，不再靠内容撑开，也不再折行顶高整行 */
 .nameCell {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .renameInput {
   width: 100%;
@@ -114,8 +135,11 @@
   justify-content: flex-end;
   gap: 8px;
 }
-.skeletonPad {
-  padding: 0 18px;
+/* 骨架表的「运行」单元格：铺开开关 + 文案的占位，间距对齐 .switch 的 gap */
+.skelSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .failure {
   margin-bottom: 16px;

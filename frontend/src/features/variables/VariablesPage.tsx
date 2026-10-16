@@ -27,8 +27,17 @@ import { useAuth } from '../auth/authStore'
 import OwnerFilter, { ownerName } from '../../common/OwnerFilter'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { IconPlus, IconRefresh, IconTrash, IconVariables } from '../../common/icons'
-import { ListSkeleton } from '../../common/Skeleton'
-import ErrorBox from '../../common/ErrorBox'
+import {
+  BADGE_H,
+  PagerSkeleton,
+  SkeletonBox,
+  SkeletonButton,
+  SkeletonChip,
+  SkeletonText,
+  TEXT_H,
+  type TableColumn,
+} from '../../common/Skeleton'
+import TableFrame from '../../common/TableFrame'
 import { usePagedQuery } from '../../common/usePagedQuery'
 import { useToast } from '../../common/Toast'
 import Pagination from '../../common/Pagination'
@@ -45,6 +54,77 @@ const DEFAULT_PAGE_SIZE = 50
 const SCOPE_LABELS: Record<string, string> = {
   graph: '图级',
   account: '账号级',
+}
+
+/* 骨架的层高（TEXT_H / BADGE_H）与表头都在 common/Skeleton：和工作流页是同一套表格版式，
+   连列宽声明都共用一份机制，这里只留本页的列配置。 */
+
+/**
+ * 表头列 = 这一列的**唯一出处**，「加一列」要改的东西都在这条里：
+ * - `label` / `width` / `td` / `skeleton(row)` 的形状见 `TableColumn`（`common/Skeleton`）：
+ *   列宽由 `TableColgroup` 归一成百分比写进 `<col>`，表头与骨架行渲染的是同一份配置；
+ * - `adminOnly`：筛选只写在 `visibleColumns` 一处，表头与骨架行走的是同一个它。
+ */
+type Column = TableColumn & { adminOnly?: boolean }
+
+const COLUMNS: Column[] = [
+  {
+    label: '作用域',
+    width: 96,
+    skeleton: (i) => (
+      // 宽度取「账号级 / 图级」两种，圆角 6 对齐 .scopeBadge
+      <SkeletonBox width={i % 2 ? 42 : 53} height={BADGE_H} radius={6} />
+    ),
+  },
+  {
+    label: '变量名',
+    width: 240,
+    td: styles.keyCell,
+    skeleton: (i) => <SkeletonText width={140 + ((i * 19) % 60)} height={TEXT_H} />,
+  },
+  {
+    label: '类型',
+    width: 130,
+    // 与作用域徽标同高：真实 .chip(25.2) 与 .scopeBadge(25.6) 只差 0.4px
+    skeleton: (i) => <SkeletonChip width={i % 2 ? 52 : 72} height={BADGE_H} />,
+  },
+  {
+    label: '归属',
+    width: 136,
+    adminOnly: true,
+    td: styles.ownerCell,
+    skeleton: () => <SkeletonText width={72} height={TEXT_H} />,
+  },
+  {
+    label: '所属图',
+    width: 168,
+    td: styles.graphCell,
+    skeleton: () => <SkeletonText width={112} height={TEXT_H} />,
+  },
+  {
+    label: '有效期',
+    width: 100,
+    td: styles.ttl,
+    // .ttl 是 12px（自算行盒 19.2），和同一行其它文字条等高更重要，且它不决定行高
+    skeleton: () => <SkeletonText width={52} height={TEXT_H} />,
+  },
+  {
+    label: '操作',
+    width: 210,
+    alignRight: true,
+    skeleton: () => (
+      <div className={styles.rowActions}>
+        {/* 查看器（「编辑 / 查看」两字）与删除（图标 + 两字）两个 .btn */}
+        <SkeletonButton width={60} />
+        <SkeletonButton width={82} />
+      </div>
+    ),
+  },
+]
+
+/** 当前角色能看到的列：表头与骨架行都走这一个 filter，「归属」不可能只在一处漏掉 */
+function visibleColumns(isAdmin: boolean) {
+  return COLUMNS.filter((c) => !c.adminOnly || isAdmin)
 }
 
 type Filters = {
@@ -111,6 +191,9 @@ export default function VariablesPage() {
     fallbackErrorTitle: '变量加载失败',
     notAvailableTitle: '变量看不了',
   })
+
+  /** 当前角色能看到的列：表头、骨架行、列宽（colgroup）都走这一份 */
+  const columns = visibleColumns(isAdmin)
 
   function submitSearch(event: React.FormEvent) {
     event.preventDefault()
@@ -247,113 +330,109 @@ export default function VariablesPage() {
 
       {/* 结果区 */}
       <section className={`card ${styles.listCard}`}>
-        {query.loading ? (
-          <ListSkeleton rows={6} />
-        ) : query.error ? (
-          <ErrorBox error={query.error} onRetry={() => query.refresh(false)} />
-        ) : query.items.length === 0 ? (
-          <div className="state-box">
-            <IconVariables size={18} className={styles.stateIcon} />
-            没有符合条件的变量
-          </div>
-        ) : (
-          <>
-            {/* 表格样式与工作流页一致：作用域 / 变量名 / 类型 / 归属 / 所属图 / 有效期 / 操作 */}
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>作用域</th>
-                    <th>变量名</th>
-                    <th>类型</th>
-                    {isAdmin && <th>归属</th>}
-                    <th>所属图</th>
-                    <th>有效期</th>
-                    <th style={{ textAlign: 'right' }}>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {query.items.map((entry) => (
-                    <tr
-                      key={`${entry.scope}:${entry.owner_id}:${entry.workflow_id}:${entry.key}`}
-                    >
-                      <td>
-                        <span className={styles.scopeBadge} data-scope={entry.scope}>
-                          {SCOPE_LABELS[entry.scope] ?? entry.scope}
-                        </span>
-                      </td>
-                      <td className={styles.keyCell} title={entry.key}>
-                        {entry.key}
-                      </td>
-                      <td>
-                        {entry.type ? (
-                          <span className={`chip ${styles.typeTag}`}>{typeLabel(entry)}</span>
-                        ) : (
-                          <span className={styles.muted}>—</span>
-                        )}
-                      </td>
-                      {isAdmin && (
-                        <td
-                          className={`${styles.ownerCell} ${
-                            entry.owner_id ? '' : styles.ownerUnknown
-                          }`}
-                          title={entry.owner_id || '查不到归属（图可能已被删）'}
-                        >
-                          {entry.owner_id ? ownerName(entry.owner_id, owners) : '无归属'}
-                        </td>
-                      )}
-                      <td className={styles.graphCell}>
-                        {entry.workflow_id ? (
-                          <span
-                            className={styles.graphName}
-                            title={`图 id：${entry.workflow_id}`}
-                          >
-                            {entry.workflow_name || entry.workflow_id}
-                          </span>
-                        ) : (
-                          <span className={styles.muted}>—</span>
-                        )}
-                      </td>
-                      <td className={styles.ttl}>{formatTtl(entry.ttl)}</td>
-                      <td>
-                        <div className={styles.rowActions}>
-                          {entry.type && (
-                            <VariableValueViewer
-                              entry={entry}
-                              onChanged={() => query.refresh(true)}
-                              className={styles.viewerCell}
-                            />
-                          )}
-                          <button
-                            type="button"
-                            className="btn btn-danger-ghost"
-                            disabled={deleting}
-                            title="删除这个变量"
-                            onClick={() => setPendingDelete(entry)}
-                          >
-                            <IconTrash size={14} />
-                            删除
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* 加载 / 空 / 错 / 页脚四态全交给 TableFrame：
+            - 表格壳与表头跨加载态保留（只换 tbody 的行），翻页 / 点查询时列宽不重算、表头不重建；
+            - 250ms 内不换内容、9s 后骨架停扫光并给「加载较慢 + 重试」，与其它页同一套口径；
+            - 错误与空态都要等相位落定才显示 —— 重试期间 error 还留着旧值，那时该显示加载态。 */}
+        <TableFrame
+          columns={columns}
+          tableClassName={styles.table}
+          wrapClassName={styles.tableWrap}
+          loading={query.loading}
+          error={query.error}
+          isEmpty={query.items.length === 0}
+          onRetry={() => query.refresh(false)}
+          liveLabel="正在加载变量数据…"
+          empty={
+            <div className="state-box">
+              <IconVariables size={18} className={styles.stateIcon} />
+              没有符合条件的变量
             </div>
-
-            <Pagination
-              page={query.page}
-              pageSize={query.pageSize}
-              total={query.total}
-              onChange={query.setPage}
-              pageSizeOptions={PAGE_SIZE_OPTIONS}
-              onPageSizeChange={query.setPageSize}
-              disabled={query.loading}
-              className={styles.pager}
-            />
-          </>
-        )}
+          }
+          footer={{
+            real: (
+              <Pagination
+                page={query.page}
+                pageSize={query.pageSize}
+                total={query.total}
+                onChange={query.setPage}
+                pageSizeOptions={PAGE_SIZE_OPTIONS}
+                onPageSizeChange={query.setPageSize}
+                disabled={query.loading}
+                className={styles.pager}
+              />
+            ),
+            // 骨架页脚复用真分页条那个类，几何（内边距 / 上边框）不可能与它漂移
+            skeleton: <PagerSkeleton className={styles.pager} />,
+          }}
+        >
+          {/* 表格样式与工作流页一致：作用域 / 变量名 / 类型 / 归属 / 所属图 / 有效期 / 操作 */}
+          {query.items.map((entry) => (
+            <tr
+              key={`${entry.scope}:${entry.owner_id}:${entry.workflow_id}:${entry.key}`}
+            >
+              <td>
+                <span className={styles.scopeBadge} data-scope={entry.scope}>
+                  {SCOPE_LABELS[entry.scope] ?? entry.scope}
+                </span>
+              </td>
+              <td className={styles.keyCell} title={entry.key}>
+                {entry.key}
+              </td>
+              <td>
+                {entry.type ? (
+                  <span className={`chip ${styles.typeTag}`}>{typeLabel(entry)}</span>
+                ) : (
+                  <span className={styles.muted}>—</span>
+                )}
+              </td>
+              {isAdmin && (
+                <td
+                  className={`${styles.ownerCell} ${
+                    entry.owner_id ? '' : styles.ownerUnknown
+                  }`}
+                  title={entry.owner_id || '查不到归属（图可能已被删）'}
+                >
+                  {entry.owner_id ? ownerName(entry.owner_id, owners) : '无归属'}
+                </td>
+              )}
+              <td className={styles.graphCell}>
+                {entry.workflow_id ? (
+                  <span
+                    className={styles.graphName}
+                    title={`图 id：${entry.workflow_id}`}
+                  >
+                    {entry.workflow_name || entry.workflow_id}
+                  </span>
+                ) : (
+                  <span className={styles.muted}>—</span>
+                )}
+              </td>
+              <td className={styles.ttl}>{formatTtl(entry.ttl)}</td>
+              <td>
+                <div className={styles.rowActions}>
+                  {entry.type && (
+                    <VariableValueViewer
+                      entry={entry}
+                      onChanged={() => query.refresh(true)}
+                      className={styles.viewerCell}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-danger-ghost"
+                    disabled={deleting}
+                    title="删除这个变量"
+                    onClick={() => setPendingDelete(entry)}
+                  >
+                    <IconTrash size={14} />
+                    删除
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </TableFrame>
       </section>
 
       {/* 新增变量：只建名字 + 类型（值随后在行内点「编辑」填），建好了静默刷新列表 */}

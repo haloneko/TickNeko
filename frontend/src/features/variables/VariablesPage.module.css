@@ -119,8 +119,14 @@ select.control {
 .tableWrap {
   overflow-x: auto;
 }
+/* 列宽由表头（COLUMNS 的权重）决定，不由内容决定 —— 骨架表与真实表共用同一个表头，
+   于是两边的列宽逐像素相同：数据回来后既不换列宽，也不会为塞下长文案而变宽
+   （长文案在各自单元格里截尾，悬停看全）。min-width 取各列权重之和，
+   保证窄屏时列不会被压到内容溢出单元格；真放不下就由 .tableWrap 横向滚动。 */
 .table {
   width: 100%;
+  min-width: 1080px;
+  table-layout: fixed;
   border-collapse: collapse;
 }
 .table th {
@@ -141,6 +147,11 @@ select.control {
 }
 .table tr:last-child td {
   border-bottom: none;
+}
+/* 行淡入：骨架一撤、真实行直接「啪」地出现太生硬。动画挂在行上（新 key 会重建元素，
+   于是翻页 / 换筛选也是淡入）；prefers-reduced-motion 时被 base.css 全局压成瞬时。 */
+.table tbody tr {
+  animation: fade-in 0.24s var(--ease-out);
 }
 /* 行悬停：给整行一层淡淡的强调，方便横向扫读 */
 .table tbody tr:hover td {
@@ -173,7 +184,7 @@ select.control {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-1);
-  max-width: 280px;
+  /* 宽度由表头 COLUMNS 的权重决定（.table 是 table-layout: fixed），这里只负责截尾 */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -187,9 +198,8 @@ select.control {
   white-space: nowrap;
 }
 
-/* 归属 / 所属图：长 id 截尾，悬停看全 */
+/* 归属 / 所属图：长 id 截尾，悬停看全（宽度同样来自表头） */
 .ownerCell {
-  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -199,7 +209,6 @@ select.control {
   color: var(--text-3);
 }
 .graphCell {
-  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -237,7 +246,9 @@ select.control {
 }
 
 /* ---------- 分页 ---------- */
-/* 分页条本体样式在 common/Pagination.module.css，这里只调它在列表卡片里的位置 */
+/* 分页条本体样式在 common/Pagination.module.css，这里只调它在列表卡片里的位置。
+   骨架页脚的排布在 common/Skeleton 的 PagerSkeleton（内层 .pager-skeleton）——
+   它把这个类复用过去，所以高度与横向位置只有这一处出处。 */
 .pager {
   margin: 0;
   padding: 14px 18px;

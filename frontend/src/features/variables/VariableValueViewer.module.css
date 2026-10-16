@@ -32,6 +32,12 @@
   flex-wrap: wrap;
   margin: 8px 0;
 }
+/* 行内那条工具栏（表格单元格里的那个）：外边距归零。
+   上面那份 8px 是给弹窗里那条写的，长在单元格里会把整行从 64 顶到 80.8
+   —— 单元格本身的 12px 内边距已经是同样的留白。 */
+.rowToolbar {
+  margin: 0;
+}
 .hint {
   color: var(--text-3);
   font-size: 12px;

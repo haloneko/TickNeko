@@ -15,7 +15,8 @@ import { ApiRequestError } from '../../lib/http'
 import { useAuth } from '../auth/authStore'
 import { useToast } from '../../common/Toast'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
-import { ListSkeleton } from '../../common/Skeleton'
+import { SkeletonBox, SkeletonButton, SkeletonChip, SkeletonText } from '../../common/Skeleton'
+import LoadingRegion from '../../common/LoadingRegion'
 import {
   IconRefresh,
   IconMonitor,
@@ -44,6 +45,52 @@ function DeviceIcon({ type, size = 20 }: { type: string; size?: number }) {
   if (type === 'mobile') return <IconPhone size={size} />
   if (type === 'desktop') return <IconMonitor size={size} />
   return <IconDevices size={size} />
+}
+
+/* 占位条高度取真实文本的行盒高度（字号 × 全局 line-height 1.6），同高才不会跳行 */
+const TITLE_LINE = 22 // .deviceName 14px × 1.6 ≈ 22.4
+const META_LINE = 19 // .rowMeta 12px × 1.6 ≈ 19.2
+const CHIP_HEIGHT = 21 // .kindChip 11px × 1.7 加上下边框
+
+/**
+ * 骨架列表：结构与真实行逐项对齐 —— 同样是 `<ul>` / `<li>`，同样挂 `styles.row` /
+ * `rowMain` / `rowTitle` / `rowMeta` / `rowAction`，行高、内边距、间距、边框因此
+ * 全部由真实 CSS 决定，只有内容换成原子占位；占位条按行盒高度取，加载完切换不跳高。
+ */
+function SessionsListSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <ul className={styles.list} aria-busy="true">
+      {Array.from({ length: rows }).map((_, i) => (
+        <li key={i} className={styles.row} aria-hidden="true">
+          {/* 40×10 对齐 .deviceIcon 的图标盒 */}
+          <SkeletonBox size={40} radius={10} />
+          <div className={styles.rowMain}>
+            <div className={styles.rowTitle}>
+              <SkeletonText width={92 + ((i * 11) % 46)} height={TITLE_LINE} />
+              {/* 每行都有一个有效期胶囊；宽度取「会话有效 / 30 天有效」两种 */}
+              <SkeletonChip width={i % 2 ? 62 : 78} height={CHIP_HEIGHT} />
+            </div>
+            <div className={styles.rowMeta}>
+              <SkeletonText width={138} height={META_LINE} />
+              {/* 后两项真实行里带 12px 图标（IP / 时间），占位也留出图标位 */}
+              <span className={styles.metaItem}>
+                <SkeletonBox size={12} radius={3} />
+                <SkeletonText width={96} height={META_LINE} />
+              </span>
+              <span className={styles.metaItem}>
+                <SkeletonBox size={12} radius={3} />
+                <SkeletonText width={106} height={META_LINE} />
+              </span>
+            </div>
+          </div>
+          <div className={styles.rowAction}>
+            {/* 「下线」：.btn 的 padding 16×2 + 两字文案 */}
+            <SkeletonButton width={60} />
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 export default function SessionsPage() {
@@ -137,73 +184,80 @@ export default function SessionsPage() {
         </div>
       </header>
 
+      {/* 骨架 / 空态 / 慢加载提示由 LoadingRegion 收口（错误走 toast，不留错误块：
+          这一页的操作本身就带确认弹窗，拉不到列表时给重试按钮即可） */}
       <section className={`card ${styles.listCard}`}>
-        {loading ? (
-          <ListSkeleton rows={5} />
-        ) : sessions.length === 0 ? (
-          <div className="state-box">
-            <IconDevices size={28} className={styles.stateIcon} />
-            <span>没有任何登录记录</span>
-          </div>
-        ) : (
-          <ul className={styles.list}>
-            {sessions.map((s) => (
-              <li
-                key={s.token_hash}
-                className={`${styles.row} ${s.current ? styles.rowCurrent : ''}`}
-              >
-                <span className={styles.deviceIcon}>
-                  <DeviceIcon type={s.device_type} />
-                </span>
+        <LoadingRegion
+          loading={loading}
+          isEmpty={sessions.length === 0}
+          onRetry={() => void load()}
+          liveLabel="正在加载登录设备…"
+          skeleton={<SessionsListSkeleton />}
+          empty={
+            <div className="state-box">
+              <IconDevices size={28} className={styles.stateIcon} />
+              <span>没有任何登录记录</span>
+            </div>
+          }
+        >
+        <ul className={styles.list}>
+          {sessions.map((s) => (
+            <li
+              key={s.token_hash}
+              className={`${styles.row} ${s.current ? styles.rowCurrent : ''}`}
+            >
+              <span className={styles.deviceIcon}>
+                <DeviceIcon type={s.device_type} />
+              </span>
 
-                <div className={styles.rowMain}>
-                  <div className={styles.rowTitle}>
-                    <span className={styles.deviceName}>
-                      {s.device_name || '未知设备'}
-                    </span>
-                    {s.current && <span className={`chip chip-accent ${styles.currentChip}`}>本机</span>}
-                    <span className={`chip ${styles.kindChip}`}>
-                      {s.remembered ? '30 天有效' : '会话有效'}
-                    </span>
-                  </div>
-                  <div className={styles.rowMeta}>
-                    <span>{[s.browser, s.os].filter(Boolean).join(' · ') || '未知浏览器 / 系统'}</span>
-                    {s.ip && (
-                      <span className={styles.metaItem}>
-                        <IconPin size={12} />
-                        {s.ip}
-                      </span>
-                    )}
+              <div className={styles.rowMain}>
+                <div className={styles.rowTitle}>
+                  <span className={styles.deviceName}>
+                    {s.device_name || '未知设备'}
+                  </span>
+                  {s.current && <span className={`chip chip-accent ${styles.currentChip}`}>本机</span>}
+                  <span className={`chip ${styles.kindChip}`}>
+                    {s.remembered ? '30 天有效' : '会话有效'}
+                  </span>
+                </div>
+                <div className={styles.rowMeta}>
+                  <span>{[s.browser, s.os].filter(Boolean).join(' · ') || '未知浏览器 / 系统'}</span>
+                  {s.ip && (
                     <span className={styles.metaItem}>
-                      <IconClock size={12} />
-                      {formatTime(s.created_at)}
+                      <IconPin size={12} />
+                      {s.ip}
                     </span>
-                  </div>
-                </div>
-
-                <div className={styles.rowAction}>
-                  {s.current ? (
-                    <button
-                      type="button"
-                      className="btn btn-danger"
-                      onClick={() => setConfirm({ kind: 'one', session: s })}
-                    >
-                      退出登录
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => setConfirm({ kind: 'one', session: s })}
-                    >
-                      下线
-                    </button>
                   )}
+                  <span className={styles.metaItem}>
+                    <IconClock size={12} />
+                    {formatTime(s.created_at)}
+                  </span>
                 </div>
-              </li>
-            ))}
-          </ul>
-        )}
+              </div>
+
+              <div className={styles.rowAction}>
+                {s.current ? (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => setConfirm({ kind: 'one', session: s })}
+                  >
+                    退出登录
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setConfirm({ kind: 'one', session: s })}
+                  >
+                    下线
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+        </LoadingRegion>
       </section>
 
       <p className={styles.footNote}>
