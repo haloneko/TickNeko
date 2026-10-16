@@ -162,39 +162,58 @@
   }
 }
 
-/* 列表型骨架：每行「头像块 + 两行文字 + 右侧操作块」，横向内边距交给外层容器 */
-.skeleton-list {
-  display: flex;
-  flex-direction: column;
+/* 慢加载的骨架：挂在一个祖先上（骨架行 / 骨架表），把后代所有占位块一起停掉扫光。
+   一直闪下去，看的人分不清是「还在加载」还是「已经卡死」；底色同时淡一档，
+   把视觉主次让给下面的「加载较慢 + 重试」。 */
+.skeleton-calm .skeleton {
+  background: var(--skeleton-base-calm);
 }
-.skeleton-row {
+.skeleton-calm .skeleton::after {
+  animation: none;
+}
+
+/* 慢加载提示条：顶在页脚位置（表格 / 列表 / 卡片网格都用这里），与分页条同高
+   （14 + 30 + 14 + 上边框 = 59），慢加载 → 加载完切到分页条时卡片不跳高。 */
+.loading-slow {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--border);
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 12.5px;
+  animation: fade-in 0.24s var(--ease-out);
 }
-.skeleton-row:last-child {
-  border-bottom: none;
+/* 提示条里的按钮收成 30 高（正文 12.5 × 1.6 + 4×2 + 边框 1×2），与分页条控件等高 */
+.loading-slow .btn {
+  padding: 4px 12px;
+  font-size: 12.5px;
 }
-.skeleton-avatar {
-  flex: none;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+
+/* 骨架页脚的内层排布：左右各一组控件，与真分页条同一个分布。
+   容器几何（内边距 / 上边框 / 负外边距）由调用方传进来的「真分页条类」给，所以这里只管排布 ——
+   两处各写一份的后果是某天只改了其中一页的内边距。 */
+.pager-skeleton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 18px;
 }
-.skeleton-lines {
-  flex: 1 1 auto;
-  min-width: 0;
+
+/* 骨架原子件：只提供统一视觉语言（颜色 / 圆角 / 不收缩），
+   版式与尺寸交给调用方复用真实内容的 class，避免与真实版式漂移。
+   横向整体内边距仍由外层容器负责（与真实列表的约定一致）。 */
+.skeleton-text {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
-.skeleton-pill {
+.skeleton-box,
+.skeleton-chip,
+.skeleton-button {
   flex: none;
-  width: 70px;
-  height: 30px;
-  border-radius: var(--r-sm);
 }
 
 /* 卡片网格型骨架：和卡片网格同列数，版式逐项对齐真实卡片

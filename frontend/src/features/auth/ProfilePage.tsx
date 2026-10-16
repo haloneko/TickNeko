@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { ApiRequestError, http } from '../../lib/http'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
-import { Skeleton } from '../../common/Skeleton'
+import { Skeleton, SkeletonButton, SkeletonText } from '../../common/Skeleton'
 import { useAuth } from './authStore'
 import { useToast } from '../../common/Toast'
 import AvatarImage from './AvatarImage'
@@ -50,6 +50,83 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(2)} MB`
+}
+
+/**
+ * 资料页骨架：外壳直接复用真实版式的类（`.page` / `.hero` / `.card` / `.form` /
+ * `.passwordGrid` / `.control`），内边距、圆角、间距、窄屏换行点因此与真实页面
+ * 同一份，加载完切换不跳高；只有内容换成原子占位。
+ *
+ * 标题区照画真的 —— 它不随数据变，也没有等待中的内容。
+ */
+function ProfileSkeleton() {
+  return (
+    <div className={styles.page}>
+      <div className={styles.head}>
+        <h1 className={styles.title}>个人设置</h1>
+        <p className={styles.sub}>昵称与头像其他用户可见；密码只影响你自己的登录。</p>
+      </div>
+
+      <section className={styles.hero}>
+        <div className={styles.heroAvatarWrap}>
+          {/* 对齐 .heroAvatar 的 84×84 正圆 */}
+          <Skeleton width={84} height={84} radius="50%" />
+        </div>
+        <div className={styles.heroInfo}>
+          {/* 行盒高度：.heroName 19px × 1.6 ≈ 30、.heroAccount 12.5px × 1.6 = 20 */}
+          <SkeletonText width="38%" height={30} />
+          <SkeletonText width="26%" height={20} />
+        </div>
+        <div className={styles.heroActions}>
+          {/* 「更换头像 / 删除头像」两颗 .btn 的量级；有它们窄屏才会和真实页面同样换行 */}
+          <SkeletonButton width={108} />
+          <SkeletonButton width={108} />
+        </div>
+      </section>
+
+      <div className={styles.sections}>
+        <section className={styles.card}>
+          <div className={styles.cardHead}>
+            {/* .cardTitle 15px × 1.6 = 24 */}
+            <SkeletonText width={64} height={24} />
+          </div>
+          <div className={styles.form}>
+            <div className={styles.inlineForm}>
+              {/* 输入框外壳直接用 .control：边框 / 圆角 / 内边距 / 与按钮的间距都是它自己的，
+                  里面那条占位按输入行盒取高（上下 padding 10×2 + 正文 ≈ 42） */}
+              <div className={styles.control}>
+                <Skeleton width="100%" height={42} />
+              </div>
+              <SkeletonButton width={106} />
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.card}>
+          <div className={styles.cardHead}>
+            <SkeletonText width={64} height={24} />
+          </div>
+          <div className={styles.form}>
+            {/* 当前密码独占一行，新密码与「再输一次」并排 —— 与真实 .passwordGrid 同列数 */}
+            <div className={styles.passwordGrid}>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className={`${styles.field} ${i === 0 ? styles.span2 : ''}`}>
+                  {/* .label 13px × 1.6 ≈ 21 */}
+                  <SkeletonText width={64} height={21} />
+                  <div className={styles.control}>
+                    <Skeleton width="100%" height={42} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div>
+              <SkeletonButton width={106} />
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  )
 }
 
 export default function ProfilePage() {
@@ -276,32 +353,9 @@ export default function ProfilePage() {
     }
   }
 
-  if (!profile) {
-    return (
-      <div className={styles.page}>
-        <div className={styles.head}>
-          <h1 className={styles.title}>个人设置</h1>
-          <p className={styles.sub}>昵称与头像其他用户可见；密码只影响你自己的登录。</p>
-        </div>
-        <div className={styles.skelHero}>
-          <Skeleton width={84} height={84} radius="50%" />
-          <div className={styles.skelLines}>
-            <Skeleton width="38%" height={18} />
-            <Skeleton width="26%" height={12} />
-          </div>
-        </div>
-        <div className={styles.skelCard}>
-          <Skeleton width={64} height={16} />
-          <Skeleton width="100%" height={42} radius={11} />
-        </div>
-        <div className={styles.skelCard}>
-          <Skeleton width={64} height={16} />
-          <Skeleton width="100%" height={42} radius={11} />
-          <Skeleton width="100%" height={42} radius={11} />
-        </div>
-      </div>
-    )
-  }
+  // 资料还没到手（守卫刚放行的瞬间）：直接给骨架。同概览页，这页也没有「保住上一屏
+  // 内容」的说法，不走 250ms 延迟 —— 延迟只会白留一屏空白
+  if (!profile) return <ProfileSkeleton />
 
   return (
     <div className={styles.page}>

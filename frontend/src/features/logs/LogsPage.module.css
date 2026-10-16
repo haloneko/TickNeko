@@ -194,6 +194,10 @@ input[type='datetime-local'].control {
   border-radius: var(--r-sm);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+/* 骨架行复用上面的版式（间距 / 内边距只有一份），但它不是按钮，别显示可点的手型 */
+.rowToggleSkeleton {
+  cursor: default;
+}
 
 /* 级别徽标 */
 .levelBadge {
@@ -343,5 +347,10 @@ input[type='datetime-local'].control {
   margin: 0 -18px;
   padding: 14px 18px;
   border-top: 1px solid var(--border);
+}
+/* 慢加载提示顶替分页条时沿用同一套横向几何（负外边距撑满卡片，见上），
+   切来不跳高也不缩进 */
+.slowNotice {
+  margin: 0 -18px;
 }
 

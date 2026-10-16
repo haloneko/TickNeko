@@ -30,18 +30,16 @@
   gap: 12px;
   margin-bottom: 24px;
 }
-.skel-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-}
 .skel-module {
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 18px;
+}
+/* 卡里那颗图标是定宽的（.skeleton 不给 flex），文字条堆要占满剩下的宽度；
+   列排布与行距由 SkeletonText 自己给（.skeleton-text），这里只补「占位」这一件事 */
+.skel-module > :last-child {
+  flex: 1;
 }
 
 .card-head {

@@ -369,14 +369,19 @@ export default function VariableValueViewer({
 
   return (
     <div className={className}>
-      <div className={styles.toolbar}>
+      {/* 行内这条工具栏不能带外边距（rowToolbar）：它长在表格单元格里，
+          那 8px 上下边距会把整行从 64 顶到 80.8；弹窗里那条仍用 toolbar */}
+      <div className={`${styles.toolbar} ${styles.rowToolbar}`}>
         {entry.type && (
-          <button type="button" className="btn" onClick={showEditor}>
+          // 不可编辑时把整句原因收进 title：20+ 字摆在按钮旁边会折行，把行顶高
+          <button
+            type="button"
+            className="btn"
+            onClick={showEditor}
+            title={entry.editable ? undefined : entry.reason || undefined}
+          >
             {entry.editable ? '编辑' : '查看'}
           </button>
-        )}
-        {!entry.editable && entry.reason && entry.type && (
-          <span className={styles.hint}>{entry.reason}</span>
         )}
       </div>
       {open && (

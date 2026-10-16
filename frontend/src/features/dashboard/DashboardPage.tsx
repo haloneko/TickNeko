@@ -19,7 +19,8 @@ import {
   IconCopy,
   IconChevronDown,
 } from '../../common/icons'
-import { Skeleton } from '../../common/Skeleton'
+import { Skeleton, SkeletonText } from '../../common/Skeleton'
+import LoadingRegion from '../../common/LoadingRegion'
 import styles from './DashboardPage.module.css'
 
 const MODULE_ICONS = {
@@ -28,6 +29,45 @@ const MODULE_ICONS = {
   '/logs': IconLogs,
   '/debug': IconTerminal,
 } as const
+
+/**
+ * 整页骨架：概览页的占位就是整页版式本身（问候语 + 两张卡 + 模块宫格），
+ * 所以它不是「一块区域的骨架」，而是与真实页面同构的一屏 —— 由 LoadingRegion 整块替换。
+ */
+function DashboardSkeleton() {
+  return (
+    <div>
+      <div className={styles.skelGreet}>
+        <Skeleton width={230} height={26} />
+        <Skeleton width={340} height={13} />
+      </div>
+      <section className={styles.grid}>
+        {[0, 1].map((i) => (
+          <div key={i} className={`card ${styles.card}`}>
+            <Skeleton width={88} height={15} />
+            {/* 三行文字条：宽度节奏交给 SkeletonText（首行最长 / 交替收窄 / 末行留白），
+                不再手摆一堆积百分比 */}
+            <SkeletonText lines={3} gap={10} style={{ marginTop: 16 }} />
+          </div>
+        ))}
+      </section>
+      <section className={styles.modules}>
+        <div className={styles.sectionHead}>
+          <Skeleton width={92} height={16} />
+        </div>
+        <div className={styles.moduleGrid}>
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className={`card ${styles.skelModule}`}>
+              <Skeleton width={44} height={44} radius={12} />
+              {/* 模块名 + 说明两行 */}
+              <SkeletonText lines={2} gap={10} />
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate()
@@ -107,157 +147,124 @@ export default function DashboardPage() {
   const user = state.user
   const modules = NAV_ITEMS.filter((n) => n.path !== '/')
 
-  if (loading || !user) {
-    return (
-      <div>
-        <div className={styles.skelGreet}>
-          <Skeleton width={230} height={26} />
-          <Skeleton width={340} height={13} />
-        </div>
+  // 用户还没到手（守卫刚放行的瞬间）：直接给整页骨架。这页没有「保住上一屏内容」的说法，
+  // 所以不走 250ms 延迟 —— 延迟只会白留 250ms 空屏
+  if (!user) return <DashboardSkeleton />
+
+  return (
+    <LoadingRegion loading={loading} skeleton={<DashboardSkeleton />} liveLabel="正在加载控制台…">
+      <div className="rise">
+        {/* 欢迎 */}
+        <header className={styles.greet}>
+          <h2 className={styles.greetTitle}>
+            你好，{user.nickname || user.account}
+          </h2>
+          <p className={styles.greetSub}>
+            欢迎使用 TickNeko 机器人框架控制台，令牌有效，接口层随时听调。
+          </p>
+        </header>
+
+        {/* 概览卡 */}
         <section className={styles.grid}>
-          {[0, 1].map((i) => (
-            <div key={i} className={`card ${styles.card}`}>
-              <Skeleton width={88} height={15} />
-              <div className={styles.skelLines} style={{ marginTop: 16 }}>
-                <Skeleton width="70%" height={12} />
-                <Skeleton width="52%" height={12} />
-                <Skeleton width="64%" height={12} />
+          <div className={`card ${styles.card}`}>
+            <div className={styles.cardHead}>
+              <h3 className={styles.cardTitle}>用户资料</h3>
+            </div>
+            <div className={styles.profileRow}>
+              <AvatarImage
+                initial={(user.nickname || user.account).slice(0, 1)}
+                size="lg"
+              />
+              <div>
+                <div className={styles.profileNick}>{user.nickname || '—'}</div>
+                <div className={styles.profileAccount}>@{user.account}</div>
               </div>
             </div>
-          ))}
-        </section>
-        <section className={styles.modules}>
-          <div className={styles.sectionHead}>
-            <Skeleton width={92} height={16} />
+            <dl className={styles.dataList}>
+              <div className={styles.dataRow}>
+                <dt>用户 ID</dt>
+                <dd className={styles.mono}>{user.id}</dd>
+              </div>
+              <div className={styles.dataRow}>
+                <dt>角色</dt>
+                <dd className={styles.roles}>
+                  {user.roles.map((r) => (
+                    <span key={r} className={`chip ${r === 'admin' ? 'chip-accent' : ''}`}>
+                      {r}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            </dl>
           </div>
-          <div className={styles.moduleGrid}>
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className={`card ${styles.skelModule}`}>
-                <Skeleton width={44} height={44} radius={12} />
-                <div className={styles.skelLines}>
-                  <Skeleton width="58%" height={13} />
-                  <Skeleton width="84%" height={11} />
+
+          <div className={`card ${styles.card}`}>
+            <div className={styles.cardHead}>
+              <h3 className={styles.cardTitle}>当前会话</h3>
+              <span className={styles.cardNote}>
+                {state.remembered ? '记住设备 · 30 天' : '会话登录 · 2 小时'}
+              </span>
+            </div>
+            <div className={styles.ttlRow}>
+              <span className={styles.ttlValue}>{remaining}</span>
+              <div>
+                <div className={styles.ttlLabel}>
+                  {state.expiresAt === 0 ? '会话状态' : '剩余有效期（滑动续期）'}
+                </div>
+                <div className={styles.ttlHint}>
+                  {state.expiresAt === 0
+                    ? '服务端宣告不过期'
+                    : '每次请求自动延后，闲置到期才掉线'}
                 </div>
               </div>
-            ))}
+            </div>
+            <div className={styles.traceRow}>
+              <span className={styles.traceLabel}>本机设备名</span>
+              <span className={styles.traceId}>{state.deviceName || '未知设备'}</span>
+            </div>
+            <div className={styles.tokenRow}>
+              <span className={`${styles.tokenText} ${styles.mono}`}>{maskedToken}</span>
+              <button className={`btn ${styles.copyBtn}`} onClick={copyToken}>
+                <IconCopy size={15} />
+                复制
+              </button>
+            </div>
+            <div className={styles.traceRow}>
+              <span className={styles.traceLabel}>最近请求 trace_id</span>
+              <span className={`${styles.mono} ${styles.traceId}`}>{traceId}</span>
+            </div>
+          </div>
+        </section>
+
+        {/* 模块入口 */}
+        <section className={styles.modules}>
+          <div className={styles.sectionHead}>
+            <h3 className={styles.sectionTitle}>功能模块</h3>
+          </div>
+          <div className={styles.moduleGrid}>
+            {modules.map((m) => {
+              const Icon = MODULE_ICONS[m.path as keyof typeof MODULE_ICONS] ?? m.icon
+              return (
+                <Link key={m.path} to={m.path} className={`card ${styles.moduleCard}`}>
+                  <span className={styles.moduleIcon}>
+                    <Icon size={22} />
+                  </span>
+                  <div className={styles.moduleText}>
+                    <span className={styles.moduleName}>{m.label}</span>
+                    <span className={styles.moduleHint}>
+                      {m.path === '/sessions' && '查看登录设备，远程下线其他会话'}
+                      {m.path === '/bots' && '机器人管理：添加、启停与在线客户端'}
+                      {m.path === '/logs' && '运行日志检索'}
+                      {m.path === '/debug' && 'OneBot 反向 WS 收发模拟器'}
+                    </span>
+                  </div>
+                  <IconChevronDown size={17} className={styles.moduleArrow} />
+                </Link>
+              )
+            })}
           </div>
         </section>
       </div>
-    )
-  }
-
-  return (
-    <div className="rise">
-      {/* 欢迎 */}
-      <header className={styles.greet}>
-        <h2 className={styles.greetTitle}>
-          你好，{user.nickname || user.account}
-        </h2>
-        <p className={styles.greetSub}>
-          欢迎使用 TickNeko 机器人框架控制台，令牌有效，接口层随时听调。
-        </p>
-      </header>
-
-      {/* 概览卡 */}
-      <section className={styles.grid}>
-        <div className={`card ${styles.card}`}>
-          <div className={styles.cardHead}>
-            <h3 className={styles.cardTitle}>用户资料</h3>
-          </div>
-          <div className={styles.profileRow}>
-            <AvatarImage
-              initial={(user.nickname || user.account).slice(0, 1)}
-              size="lg"
-            />
-            <div>
-              <div className={styles.profileNick}>{user.nickname || '—'}</div>
-              <div className={styles.profileAccount}>@{user.account}</div>
-            </div>
-          </div>
-          <dl className={styles.dataList}>
-            <div className={styles.dataRow}>
-              <dt>用户 ID</dt>
-              <dd className={styles.mono}>{user.id}</dd>
-            </div>
-            <div className={styles.dataRow}>
-              <dt>角色</dt>
-              <dd className={styles.roles}>
-                {user.roles.map((r) => (
-                  <span key={r} className={`chip ${r === 'admin' ? 'chip-accent' : ''}`}>
-                    {r}
-                  </span>
-                ))}
-              </dd>
-            </div>
-          </dl>
-        </div>
-
-        <div className={`card ${styles.card}`}>
-          <div className={styles.cardHead}>
-            <h3 className={styles.cardTitle}>当前会话</h3>
-            <span className={styles.cardNote}>
-              {state.remembered ? '记住设备 · 30 天' : '会话登录 · 2 小时'}
-            </span>
-          </div>
-          <div className={styles.ttlRow}>
-            <span className={styles.ttlValue}>{remaining}</span>
-            <div>
-              <div className={styles.ttlLabel}>
-                {state.expiresAt === 0 ? '会话状态' : '剩余有效期（滑动续期）'}
-              </div>
-              <div className={styles.ttlHint}>
-                {state.expiresAt === 0
-                  ? '服务端宣告不过期'
-                  : '每次请求自动延后，闲置到期才掉线'}
-              </div>
-            </div>
-          </div>
-          <div className={styles.traceRow}>
-            <span className={styles.traceLabel}>本机设备名</span>
-            <span className={styles.traceId}>{state.deviceName || '未知设备'}</span>
-          </div>
-          <div className={styles.tokenRow}>
-            <span className={`${styles.tokenText} ${styles.mono}`}>{maskedToken}</span>
-            <button className={`btn ${styles.copyBtn}`} onClick={copyToken}>
-              <IconCopy size={15} />
-              复制
-            </button>
-          </div>
-          <div className={styles.traceRow}>
-            <span className={styles.traceLabel}>最近请求 trace_id</span>
-            <span className={`${styles.mono} ${styles.traceId}`}>{traceId}</span>
-          </div>
-        </div>
-      </section>
-
-      {/* 模块入口 */}
-      <section className={styles.modules}>
-        <div className={styles.sectionHead}>
-          <h3 className={styles.sectionTitle}>功能模块</h3>
-        </div>
-        <div className={styles.moduleGrid}>
-          {modules.map((m) => {
-            const Icon = MODULE_ICONS[m.path as keyof typeof MODULE_ICONS] ?? m.icon
-            return (
-              <Link key={m.path} to={m.path} className={`card ${styles.moduleCard}`}>
-                <span className={styles.moduleIcon}>
-                  <Icon size={22} />
-                </span>
-                <div className={styles.moduleText}>
-                  <span className={styles.moduleName}>{m.label}</span>
-                  <span className={styles.moduleHint}>
-                    {m.path === '/sessions' && '查看登录设备，远程下线其他会话'}
-                    {m.path === '/bots' && '机器人管理：添加、启停与在线客户端'}
-                    {m.path === '/logs' && '运行日志检索'}
-                    {m.path === '/debug' && 'OneBot 反向 WS 收发模拟器'}
-                  </span>
-                </div>
-                <IconChevronDown size={17} className={styles.moduleArrow} />
-              </Link>
-            )
-          })}
-        </div>
-      </section>
-    </div>
+    </LoadingRegion>
   )
 }

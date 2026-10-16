@@ -59,8 +59,10 @@
   --shadow-pop: 0 18px 44px -18px rgba(16, 16, 20, 0.22),
     0 4px 12px -8px rgba(16, 16, 20, 0.1);
 
-  /* 骨架屏 */
+  /* 骨架屏：base 是占位块的底；calm 是「慢加载、已停扫光」时的底，比 base 更淡一档，
+     让「还在扫」与「不扫了、等你点重试」在余光里也能分出来 */
   --skeleton-base: #e8eaef;
+  --skeleton-base-calm: #eff1f5;
   --skeleton-shine: rgba(255, 255, 255, 0.85);
 
   /* 圆角 */
@@ -130,7 +132,8 @@
   --shadow-pop: 0 22px 52px -18px rgba(0, 0, 0, 0.78),
     0 6px 16px -10px rgba(0, 0, 0, 0.55);
 
-  /* 骨架屏 */
+  /* 骨架屏：暗色不是把亮色的灰反过来，而是「白叠加」—— 叠在任意表面色上都能自适应 */
   --skeleton-base: rgba(255, 255, 255, 0.06);
+  --skeleton-base-calm: rgba(255, 255, 255, 0.04);
   --skeleton-shine: rgba(255, 255, 255, 0.11);
 }

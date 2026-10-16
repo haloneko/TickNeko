@@ -20,7 +20,15 @@ import OwnerFilter, { ownerName } from '../../common/OwnerFilter'
 import { useAuth } from '../auth/authStore'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { EmptyState } from '../../common/EmptyState'
-import { ListSkeleton } from '../../common/Skeleton'
+import {
+  BADGE_H,
+  SkeletonButton,
+  SkeletonChip,
+  SkeletonText,
+  TEXT_H,
+  type TableColumn,
+} from '../../common/Skeleton'
+import TableFrame from '../../common/TableFrame'
 import {
   IconEdit,
   IconPlus,
@@ -49,6 +57,72 @@ function statusLabel(w: WorkflowData): { text: string; cls: string } {
   if (w.status === 'published') return { text: '已发布', cls: styles.published }
   return { text: '草稿', cls: styles.draft }
 }
+
+/* 占位高度（TEXT_H / BADGE_H）与表头都来自 common/Skeleton：变量页是同一套表格版式，
+   两页共用一份「层高」与「列宽 + 表头」的机制，只有列配置各自保留。 */
+
+/** 操作列的 5 个按钮宽度：由 .btn 的 padding 16×2 + 文案 / 图标推得（编辑、设置、重命名、发布最新版、删除） */
+const ACTION_WIDTHS = [82, 82, 74, 100, 82]
+
+/**
+ * 表头列：真实表与骨架表共用同一份 —— 顺序 / 文案 / 列宽 / 骨架占位都不可能再漂移。
+ * `width` 是列宽权重（各列之和 = .table 的 min-width），交给 TableColgroup 归一成百分比
+ * 写进 `<col>`；配合 `.table` 的 `table-layout: fixed`，列宽就不再由内容决定：数据回来后
+ * 既不换列宽，也不会被长名字 / 5 个按钮把表撑宽。权重取「表头 + 内边距 36」与真实内容
+ * 需要量的较大者；`skeleton(row)` 是这一列的占位，宽度按真实内容的量级取。
+ */
+const COLUMNS: TableColumn[] = [
+  {
+    label: '所有者', // 名字短、id 截尾（旧的 max-width 是 180）；骨架条 max 68
+    width: 130,
+    td: styles.ownerCell,
+    skeleton: (i) => <SkeletonText width={48 + (i % 3) * 10} height={TEXT_H} />,
+  },
+  {
+    label: '名称', // 最宽的数据列，长名字截尾；骨架条 max 136
+    width: 240,
+    td: styles.nameCell,
+    skeleton: (i) => <SkeletonText width={96 + ((i * 13) % 40)} height={TEXT_H} />,
+  },
+  {
+    label: '状态', // 胶囊「已发布」58
+    width: 100,
+    // 两种胶囊宽度对应「已发布 / 草稿」
+    skeleton: (i) => <SkeletonChip width={i % 2 ? 46 : 58} height={BADGE_H} />,
+  },
+  {
+    label: '运行', // 开关 38 + 间距 8 + 文案 36 = 82
+    width: 128,
+    skeleton: () => (
+      <span className={styles.skelSwitch}>
+        {/* 38×22 是公共 .switch 的轨道尺寸，它不是一个文字条，故不并入 TEXT_H */}
+        <SkeletonChip width={38} height={22} />
+        <SkeletonText width={36} height={TEXT_H} />
+      </span>
+    ),
+  },
+  // 表头「当前版本」48 比「v12」还宽，按表头算
+  { label: '当前版本', width: 96, skeleton: () => <SkeletonText width={22} height={TEXT_H} /> },
+  { label: '发布版本', width: 96, skeleton: () => <SkeletonText width={22} height={TEXT_H} /> },
+  {
+    label: '更新时间', // 「2026-10-16 01:26」一行放得下，不折行
+    width: 168,
+    td: styles.muted,
+    skeleton: () => <SkeletonText width={104} height={TEXT_H} />,
+  },
+  {
+    label: '操作', // 5 个按钮 452（与 ACTION_WIDTHS 同）
+    width: 500,
+    alignRight: true,
+    skeleton: () => (
+      <div className={styles.rowActions}>
+        {ACTION_WIDTHS.map((w, j) => (
+          <SkeletonButton key={j} width={w} />
+        ))}
+      </div>
+    ),
+  },
+]
 
 export default function WorkflowPage() {
   const { pushToast } = useToast()
@@ -187,154 +261,147 @@ export default function WorkflowPage() {
             )}
           </div>
         </div>
-        {loading ? (
-          <div className={styles.skeletonPad}>
-            <ListSkeleton rows={5} />
-          </div>
-        ) : items.length === 0 ? (
-          <EmptyState
-            icon={IconEdit}
-            title={canCreate ? '还没有工作流' : '这个归属下还没有工作流'}
-            hint={
-              canCreate
-                ? '用节点 + 连线编排自动化流程：开始节点支持时间触发（cron）与消息触发，搭配日志 / 测试节点。'
-                : '切回「全部」或自己的归属才能新建；别人名下的流只能查看与编辑。'
-            }
-            action={
-              canCreate ? (
-                <button className="btn btn-primary" onClick={() => setCreating(true)}>
-                  <IconPlus size={15} />
-                  新建工作流
-                </button>
-              ) : undefined
-            }
-          />
-        ) : (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                {/* 表头顺序照着下面每行的 td 来：所有者 / 名称 / 状态 / 运行 / 版本 / 时间 / 操作 */}
-                <th>所有者</th>
-                <th>名称</th>
-                <th>状态</th>
-                <th>运行</th>
-                <th>当前版本</th>
-                <th>发布版本</th>
-                <th>更新时间</th>
-                <th style={{ textAlign: 'right' }}>操作</th>
+        {/* 列表区整体是横向滚动容器：列宽由表头权重定死（见 COLUMNS / .table），
+            窄屏靠这里滚，而不是让 .panel 的 overflow: hidden 把右侧「操作」裁掉。
+            加载 / 空 / 页脚三态交给 TableFrame：表格壳与表头跨加载态保留，只换 tbody 的行。
+            只有 `failure` 不交给它 —— 那条红条是「列表没拉到」的补充提示，位置在面板上方，
+            允许与上一次的内容同时出现，不是「替掉内容」的错误态。 */}
+        <TableFrame
+          columns={COLUMNS}
+          tableClassName={styles.table}
+          wrapClassName={styles.tableWrap}
+          loading={loading}
+          isEmpty={items.length === 0}
+          onRetry={() => void load()}
+          liveLabel="正在加载工作流数据…"
+          empty={
+            <EmptyState
+              icon={IconEdit}
+              title={canCreate ? '还没有工作流' : '这个归属下还没有工作流'}
+              hint={
+                canCreate
+                  ? '用节点 + 连线编排自动化流程：开始节点支持时间触发（cron）与消息触发，搭配日志 / 测试节点。'
+                  : '切回「全部」或自己的归属才能新建；别人名下的流只能查看与编辑。'
+              }
+              action={
+                canCreate ? (
+                  <button className="btn btn-primary" onClick={() => setCreating(true)}>
+                    <IconPlus size={15} />
+                    新建工作流
+                  </button>
+                ) : undefined
+              }
+            />
+          }
+        >
+          {items.map((w) => {
+            const st = statusLabel(w)
+            return (
+              <tr key={w.id}>
+                {/* 归属：普通用户只有自己一份，管理员看的是全库 —— 名字撞车时靠它认人 */}
+                <td className={styles.ownerCell} title={w.owner_id}>
+                  {/* 后端已给 owner_name；万一它是空串（老数据 / 没设昵称）就用归属清单兜底 */}
+                  {w.owner_name || ownerName(w.owner_id, owners)}
+                </td>
+                <td className={styles.nameCell} title={w.name}>
+                  {renameId === w.id ? (
+                    <input
+                      autoFocus
+                      className={styles.renameInput}
+                      value={renameValue}
+                      maxLength={128}
+                      disabled={busy}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void commitRename(w.id)
+                        if (e.key === 'Escape') setRenameId(null)
+                      }}
+                      onBlur={() => setRenameId(null)}
+                    />
+                  ) : (
+                    w.name
+                  )}
+                </td>
+                <td>
+                  <span className={`chip ${st.cls}`}>{st.text}</span>
+                </td>
+                <td>
+                  <label
+                    className={styles.switch}
+                    title={
+                      w.published_version === 0
+                        ? '先发布一版，才能拨运行开关'
+                        : w.enabled
+                          ? '点一下停止：不再定时触发（发布状态不变）'
+                          : '点一下开启：按已发布版本跑'
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={w.enabled}
+                      disabled={busy || w.published_version === 0}
+                      onChange={() => void toggleEnabled(w)}
+                    />
+                    <span className={`switch ${w.enabled ? 'switch-on' : ''}`}>
+                      <span className="switch-knob" />
+                    </span>
+                    <span className={styles.switchText}>
+                      {w.enabled ? '运行中' : '已停止'}
+                    </span>
+                  </label>
+                </td>
+                <td>v{w.current_version}</td>
+                <td>{w.published_version > 0 ? `v${w.published_version}` : '—'}</td>
+                <td className={styles.muted}>{formatTime(w.updated_at)}</td>
+                <td>
+                  <div className={styles.rowActions}>
+                    <button
+                      className="btn"
+                      disabled={busy}
+                      onClick={() => setEditingId(w.id)}
+                    >
+                      <IconEdit size={14} />
+                      编辑
+                    </button>
+                    <button
+                      className="btn"
+                      disabled={busy}
+                      onClick={() => setSettingsFor(w)}
+                    >
+                      <IconSettings size={14} />
+                      设置
+                    </button>
+                    <button
+                      className="btn"
+                      disabled={busy || renameId === w.id}
+                      onClick={() => {
+                        setRenameId(w.id)
+                        setRenameValue(w.name)
+                      }}
+                    >
+                      重命名
+                    </button>
+                    <button
+                      className="btn"
+                      disabled={busy || w.current_version === 0}
+                      onClick={() => void publish(w.id)}
+                    >
+                      发布最新版
+                    </button>
+                    <button
+                      className="btn btn-danger-ghost"
+                      disabled={busy}
+                      onClick={() => setConfirmId(w.id)}
+                    >
+                      <IconTrash size={14} />
+                      删除
+                    </button>
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {items.map((w) => {
-                const st = statusLabel(w)
-                return (
-                  <tr key={w.id}>
-                    {/* 归属：普通用户只有自己一份，管理员看的是全库 —— 名字撞车时靠它认人 */}
-                    <td className={styles.ownerCell} title={w.owner_id}>
-                      {/* 后端已给 owner_name；万一它是空串（老数据 / 没设昵称）就用归属清单兜底 */}
-                      {w.owner_name || ownerName(w.owner_id, owners)}
-                    </td>
-                    <td className={styles.nameCell}>
-                      {renameId === w.id ? (
-                        <input
-                          autoFocus
-                          className={styles.renameInput}
-                          value={renameValue}
-                          maxLength={128}
-                          disabled={busy}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') void commitRename(w.id)
-                            if (e.key === 'Escape') setRenameId(null)
-                          }}
-                          onBlur={() => setRenameId(null)}
-                        />
-                      ) : (
-                        w.name
-                      )}
-                    </td>
-                    <td>
-                      <span className={`chip ${st.cls}`}>{st.text}</span>
-                    </td>
-                    <td>
-                      <label
-                        className={styles.switch}
-                        title={
-                          w.published_version === 0
-                            ? '先发布一版，才能拨运行开关'
-                            : w.enabled
-                              ? '点一下停止：不再定时触发（发布状态不变）'
-                              : '点一下开启：按已发布版本跑'
-                        }
-                      >
-                        <input
-                          type="checkbox"
-                          checked={w.enabled}
-                          disabled={busy || w.published_version === 0}
-                          onChange={() => void toggleEnabled(w)}
-                        />
-                        <span className={`switch ${w.enabled ? 'switch-on' : ''}`}>
-                          <span className="switch-knob" />
-                        </span>
-                        <span className={styles.switchText}>
-                          {w.enabled ? '运行中' : '已停止'}
-                        </span>
-                      </label>
-                    </td>
-                    <td>v{w.current_version}</td>
-                    <td>{w.published_version > 0 ? `v${w.published_version}` : '—'}</td>
-                    <td className={styles.muted}>{formatTime(w.updated_at)}</td>
-                    <td>
-                      <div className={styles.rowActions}>
-                        <button
-                          className="btn"
-                          disabled={busy}
-                          onClick={() => setEditingId(w.id)}
-                        >
-                          <IconEdit size={14} />
-                          编辑
-                        </button>
-                        <button
-                          className="btn"
-                          disabled={busy}
-                          onClick={() => setSettingsFor(w)}
-                        >
-                          <IconSettings size={14} />
-                          设置
-                        </button>
-                        <button
-                          className="btn"
-                          disabled={busy || renameId === w.id}
-                          onClick={() => {
-                            setRenameId(w.id)
-                            setRenameValue(w.name)
-                          }}
-                        >
-                          重命名
-                        </button>
-                        <button
-                          className="btn"
-                          disabled={busy || w.current_version === 0}
-                          onClick={() => void publish(w.id)}
-                        >
-                          发布最新版
-                        </button>
-                        <button
-                          className="btn btn-danger-ghost"
-                          disabled={busy}
-                          onClick={() => setConfirmId(w.id)}
-                        >
-                          <IconTrash size={14} />
-                          删除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
+            )
+          })}
+        </TableFrame>
       </section>
 
       {/* 删除不可逆：统一走确认弹窗 */}

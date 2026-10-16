@@ -21,8 +21,8 @@ import { fetchOwners, type Owner } from '../../lib/ownersApi'
 import { useAuth } from '../auth/authStore'
 import OwnerFilter, { ownerName } from '../../common/OwnerFilter'
 import { IconRefresh, IconChevronDown, IconAlert, IconClock, IconTrash } from '../../common/icons'
-import { ListSkeleton } from '../../common/Skeleton'
-import ErrorBox from '../../common/ErrorBox'
+import { PagerSkeleton, SkeletonBox, SkeletonChip, SkeletonText } from '../../common/Skeleton'
+import LoadingRegion from '../../common/LoadingRegion'
 import { usePagedQuery } from '../../common/usePagedQuery'
 import Pagination from '../../common/Pagination'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
@@ -80,6 +80,44 @@ const SOURCE_PARAMS: Record<Filters['source'], string | undefined> = {
   database: undefined, // 不写 source，后端默认就只查落库那份
   local: 'file', // 本机文件 = 所有文件出口（核心 file / 接口层 api.file / OneBot onebot.file）
   both: 'all', // 两边都要 = 不限出口（库 + 文件一起查）
+}
+
+/* 占位条高度取真实文本的行盒高度（字号 × 全局 line-height 1.6），同高才不跳行 */
+const LOG_META_LINE = 19 // .time 12px × 1.6 ≈ 19.2
+const LOG_MESSAGE_LINE = 22 // .message 13.5px × 1.6 ≈ 21.6
+
+/**
+ * 骨架列表：结构与真实行逐项对齐 —— 同样是 `<ul>` / `<li>`，同样挂 `styles.list` /
+ * `row`，行内复用 `rowToggle` / `rowMain` / `rowMeta`，间距、内边距与分隔线因此全部
+ * 由真实 CSS 决定，只有内容换成原子占位。
+ *
+ * 真实行里 `hasDetail` 才画的折叠箭头、以及 `exc_text` 才有的「异常栈」标记，
+ * 都取决于具体条目，占位里不画（不影响行高，只差右侧 16px 图标）。
+ */
+function LogsListSkeleton({ rows = 6, isAdmin }: { rows?: number; isAdmin: boolean }) {
+  return (
+    <ul className={styles.list} aria-busy="true">
+      {Array.from({ length: rows }).map((_, i) => (
+        <li key={i} className={styles.row} aria-hidden="true">
+          {/* 真实行这里是 button；占位不可点，只借它的版式 */}
+          <div className={`${styles.rowToggle} ${styles.rowToggleSkeleton}`}>
+            {/* 64×26、圆角 6 对齐 .levelBadge（等宽字体级别徽标） */}
+            <SkeletonBox width={64} height={26} radius={6} />
+            <div className={styles.rowMain}>
+              <div className={styles.rowMeta}>
+                <SkeletonText width={104} height={LOG_META_LINE} />
+                {/* 96×22、圆角 5 对齐 .logger（等宽模块名小胶囊） */}
+                <SkeletonBox width={96} height={22} radius={5} />
+                {/* 归属胶囊与真实行同条件：只有管理员看得到 */}
+                {isAdmin && <SkeletonChip width={64} height={22} />}
+              </div>
+              <SkeletonText width={`${48 + ((i * 17) % 34)}%`} height={LOG_MESSAGE_LINE} />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 export default function LogsPage() {
@@ -399,100 +437,110 @@ export default function LogsPage() {
         </div>
       </form>
 
-      {/* 结果区 */}
+      {/* 结果区：骨架 / 空态 / 错误 / 页脚四态交给 LoadingRegion，
+          相位（250ms 延迟、9s 慢加载停扫光 + 重试、读屏播报）由它自己管 */}
       <section className={`card ${styles.listCard}`}>
-        {query.loading ? (
-          <ListSkeleton rows={6} />
-        ) : query.error ? (
-          <ErrorBox error={query.error} onRetry={() => query.refresh(false)} />
-        ) : query.items.length === 0 ? (
-          <div className="state-box">
-            <IconAlert size={18} className={styles.stateIcon} />
-            没有符合条件的日志
-          </div>
-        ) : (
-          <>
-            <ul className={styles.list}>
-              {query.items.map((entry) => {
-                const hasDetail =
-                  !!entry.exc_text || Object.keys(entry.extra).length > 0
-                const expanded = expandedId === entry.record_id
-                return (
-                  <li
-                    key={entry.record_id}
-                    className={`${styles.row} ${expanded ? styles.rowExpanded : ''}`}
+        <LoadingRegion
+          loading={query.loading}
+          error={query.error}
+          isEmpty={query.items.length === 0}
+          onRetry={() => query.refresh(false)}
+          liveLabel="正在加载运行日志…"
+          skeleton={<LogsListSkeleton isAdmin={isAdmin} />}
+          empty={
+            <div className="state-box">
+              <IconAlert size={18} className={styles.stateIcon} />
+              没有符合条件的日志
+            </div>
+          }
+          footer={{
+            real: (
+              <Pagination
+                page={query.page}
+                pageSize={query.pageSize}
+                total={query.total}
+                onChange={goToPage}
+                pageSizeOptions={PAGE_SIZE_OPTIONS}
+                onPageSizeChange={changePageSize}
+                disabled={query.loading}
+                className={styles.pager}
+              />
+            ),
+            // 骨架页脚顶住分页条的位置：改前加载时整条页脚消失，卡片会先矮一截再长回来
+            skeleton: <PagerSkeleton className={styles.pager} />,
+            // 慢加载提示顶替的就是分页条：横向几何照抄（分页条靠负外边距撑满卡片）
+            slowClassName: styles.slowNotice,
+          }}
+        >
+          <ul className={styles.list}>
+            {query.items.map((entry) => {
+              const hasDetail =
+                !!entry.exc_text || Object.keys(entry.extra).length > 0
+              const expanded = expandedId === entry.record_id
+              return (
+                <li
+                  key={entry.record_id}
+                  className={`${styles.row} ${expanded ? styles.rowExpanded : ''}`}
+                >
+                  <button
+                    type="button"
+                    className={styles.rowToggle}
+                    disabled={!hasDetail}
+                    onClick={() =>
+                      setExpandedId((id) => (id === entry.record_id ? null : entry.record_id))
+                    }
+                    aria-expanded={expanded}
                   >
-                    <button
-                      type="button"
-                      className={styles.rowToggle}
-                      disabled={!hasDetail}
-                      onClick={() =>
-                        setExpandedId((id) => (id === entry.record_id ? null : entry.record_id))
-                      }
-                      aria-expanded={expanded}
-                    >
-                      <span className={styles.levelBadge} data-level={entry.level}>
-                        {entry.level}
-                      </span>
-                      <span className={styles.rowMain}>
-                        <span className={styles.rowMeta}>
-                          <span className={styles.time}>{formatTime(entry.timestamp)}</span>
-                          <span className={styles.logger}>{entry.logger_name || '—'}</span>
-                          {isAdmin && (
-                            <span
-                              className={`${styles.ownerChip} ${
-                                entry.owner_id ? '' : styles.ownerPublic
-                              }`}
-                              title={entry.owner_id || '公共（框架自身的日志，没有归属）'}
-                            >
-                              {entry.owner_id ? ownerName(entry.owner_id, owners) : '公共'}
-                            </span>
-                          )}
-                          {!!entry.exc_text && <span className={styles.excFlag}>异常栈</span>}
-                        </span>
-                        <span className={styles.message}>{entry.message}</span>
-                      </span>
-                      {hasDetail && (
-                        <IconChevronDown
-                          size={16}
-                          className={`${styles.chevron} ${expanded ? styles.chevronOpen : ''}`}
-                        />
-                      )}
-                    </button>
-
-                    {expanded && hasDetail && (
-                      <div className={styles.detail}>
-                        {entry.exc_text && (
-                          <pre className={styles.excText}>{entry.exc_text}</pre>
+                    <span className={styles.levelBadge} data-level={entry.level}>
+                      {entry.level}
+                    </span>
+                    <span className={styles.rowMain}>
+                      <span className={styles.rowMeta}>
+                        <span className={styles.time}>{formatTime(entry.timestamp)}</span>
+                        <span className={styles.logger}>{entry.logger_name || '—'}</span>
+                        {isAdmin && (
+                          <span
+                            className={`${styles.ownerChip} ${
+                              entry.owner_id ? '' : styles.ownerPublic
+                            }`}
+                            title={entry.owner_id || '公共（框架自身的日志，没有归属）'}
+                          >
+                            {entry.owner_id ? ownerName(entry.owner_id, owners) : '公共'}
+                          </span>
                         )}
-                        {Object.keys(entry.extra).length > 0 && (
-                          <pre className={styles.extraJson}>
-                            {JSON.stringify(entry.extra, null, 2)}
-                          </pre>
-                        )}
-                        <div className={styles.recordId}>
-                          {entry.seq > 0 && <>seq · {entry.seq} · </>}
-                          record_id · {entry.record_id}
-                        </div>
-                      </div>
+                        {!!entry.exc_text && <span className={styles.excFlag}>异常栈</span>}
+                      </span>
+                      <span className={styles.message}>{entry.message}</span>
+                    </span>
+                    {hasDetail && (
+                      <IconChevronDown
+                        size={16}
+                        className={`${styles.chevron} ${expanded ? styles.chevronOpen : ''}`}
+                      />
                     )}
-                  </li>
-                )
-              })}
-            </ul>
+                  </button>
 
-            <Pagination
-              page={query.page}
-              pageSize={query.pageSize}
-              total={query.total}
-              onChange={goToPage}
-              pageSizeOptions={PAGE_SIZE_OPTIONS}
-              onPageSizeChange={changePageSize}
-              disabled={query.loading}
-              className={styles.pager}
-            />
-          </>
-        )}
+                  {expanded && hasDetail && (
+                    <div className={styles.detail}>
+                      {entry.exc_text && (
+                        <pre className={styles.excText}>{entry.exc_text}</pre>
+                      )}
+                      {Object.keys(entry.extra).length > 0 && (
+                        <pre className={styles.extraJson}>
+                          {JSON.stringify(entry.extra, null, 2)}
+                        </pre>
+                      )}
+                      <div className={styles.recordId}>
+                        {entry.seq > 0 && <>seq · {entry.seq} · </>}
+                        record_id · {entry.record_id}
+                      </div>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </LoadingRegion>
       </section>
     </div>
   )

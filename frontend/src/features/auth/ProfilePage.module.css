@@ -299,30 +299,3 @@
   height: 13px;
   border-width: 2px;
 }
-
-/* ------------------------------------------------------------------ 骨架屏 */
-.skelHero {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 20px 22px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-}
-.skelLines {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-}
-.skelCard {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 20px 22px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-}
