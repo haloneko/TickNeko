@@ -4,7 +4,16 @@ import { useMemo, useRef, useState } from 'react'
 import { FullscreenDialog } from '../../common/FullscreenDialog'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { JsonEditor, type JsonEditorHandle } from '../../common/JsonEditor'
-import { IconCheck, IconCopy, IconEdit, IconEye, IconPlus, IconTrash } from '../../common/icons'
+import {
+  IconCheck,
+  IconCopy,
+  IconEdit,
+  IconEye,
+  IconPlus,
+  IconRefresh,
+  IconSave,
+  IconTrash,
+} from '../../common/icons'
 import { ApiRequestError } from '../../lib/http'
 import {
   addVariable,
@@ -424,11 +433,13 @@ export default function VariableValueViewer({
             <>
               <button
                 type="button"
-                className="btn"
+                className="icon-btn"
                 disabled={busy || dirty}
                 onClick={() => void load()}
+                title="刷新"
+                aria-label="刷新"
               >
-                刷新
+                <IconRefresh size={16} />
               </button>
               {(current.type === 'json' ||
                 (viewMode === 'json' && (current.type === 'list' || current.type === 'dict'))) && (
@@ -447,12 +458,13 @@ export default function VariableValueViewer({
               {current.editable && (
                 <button
                   type="button"
-                  className="btn btn-primary"
+                  className="icon-btn icon-btn-primary"
                   disabled={busy}
                   title="保存（Ctrl/Cmd+S）"
+                  aria-label="保存"
                   onClick={save}
                 >
-                  {busy ? '提交中…' : '保存'}
+                  <IconSave size={16} />
                 </button>
               )}
             </>
@@ -560,13 +572,25 @@ export default function VariableValueViewer({
                       {current.type === 'list' ? items.length : fields.length} 项
                     </span>
                   )}
-                  <button type="button" className="btn" onClick={add}>
-                    <IconPlus size={14} />
-                    新增
+                  {/* 这一行是「过滤框 + 两粒图标」：清空整份草稿拿危险色，
+                      和表格里那一行的删除（.iconDanger）同一个口径 */}
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={add}
+                    title="新增"
+                    aria-label="新增"
+                  >
+                    <IconPlus size={16} />
                   </button>
-                  <button type="button" className="btn" onClick={clearCollection}>
-                    <IconTrash size={14} />
-                    清空
+                  <button
+                    type="button"
+                    className="icon-btn icon-btn-danger"
+                    onClick={clearCollection}
+                    title="清空"
+                    aria-label="清空"
+                  >
+                    <IconTrash size={16} />
                   </button>
                 </div>
               )}
