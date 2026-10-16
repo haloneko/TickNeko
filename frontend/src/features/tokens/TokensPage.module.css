@@ -17,11 +17,6 @@
   font-size: 13px;
   max-width: 660px;
 }
-.actions {
-  display: flex;
-  gap: 8px;
-}
-
 .panel {
   margin-bottom: 18px;
   overflow: hidden;
@@ -241,12 +236,13 @@
   border-top: 1px solid var(--border);
 }
 
-/* 卡片操作区：右下角的「详细 / 吊销」一组 */
+/* 卡片操作区：右下角的「详细 / 吊销」一组图标按钮。间隙与工作流页的行内操作同口径
+   （4px）—— .icon-btn 的方框里本来就留了 11px 空白，再叠 8px 的 gap 会散开 */
 .cardButtons {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 4px;
 }
 
 /* 机器人详情弹窗 */

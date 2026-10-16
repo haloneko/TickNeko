@@ -210,12 +210,15 @@ export default function TokensPage() {
             不可逆。两者都会把用它连着的客户端一并断开。
           </p>
         </div>
-        <div className={styles.actions}>
-          <button className="btn" onClick={() => void load()} disabled={loading}>
-            <IconRefresh size={15} />
-            刷新
-          </button>
-        </div>
+        <button
+          className="icon-btn"
+          onClick={() => void load()}
+          disabled={loading}
+          title="刷新"
+          aria-label="刷新"
+        >
+          <IconRefresh size={16} />
+        </button>
       </header>
 
       {failure && (
@@ -319,17 +322,25 @@ export default function TokensPage() {
                       </span>
                     </div>
                     <div className={styles.cardButtons}>
-                      <button className="btn" disabled={busy} onClick={() => setDetailId(t.id)}>
-                        <IconEye size={14} />
-                        详细
+                      {/* 纯图标：文案进 title（悬停看）。「详细」单独一个词对读屏器太含糊，
+                          所以 aria-label 补成「查看详情」—— 两者不一致是有意的 */}
+                      <button
+                        className="icon-btn"
+                        disabled={busy}
+                        onClick={() => setDetailId(t.id)}
+                        title="详细"
+                        aria-label="查看详情"
+                      >
+                        <IconEye size={16} />
                       </button>
                       <button
-                        className="btn btn-danger-ghost"
+                        className="icon-btn icon-btn-danger"
                         disabled={busy}
                         onClick={() => setPending({ kind: 'revoke', id: t.id })}
+                        title="吊销"
+                        aria-label="吊销"
                       >
-                        <IconTrash size={14} />
-                        吊销
+                        <IconTrash size={16} />
                       </button>
                     </div>
                   </div>

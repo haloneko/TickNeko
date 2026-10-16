@@ -306,12 +306,14 @@
 }
 .skeleton-card-btns {
   display: flex;
-  gap: 8px;
+  gap: 4px;
 }
+/* 卡片右下角那两颗（详细 / 吊销）已改成 38 的图标按钮：占位跟着走，
+   否则骨架是两块 74×40、数据回来变成两个 38 方块，卡片底边会跳 */
 .skeleton-card-btn {
-  width: 74px;
-  height: 40px;
-  border-radius: var(--r-md);
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-sm);
 }
 
 /* 空态：图标 + 标题 + 说明 + 可选操作，比一句灰字多给出下一步 */
