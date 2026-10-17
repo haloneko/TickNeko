@@ -327,6 +327,20 @@ export const IconPublish = (p: IconProps) => (
   </svg>
 )
 
+/** 开始：三角 —— 「拨开运行开关、按已发布版本跑」。 */
+export const IconPlay = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9 5.8v12.4l9.6-6.2z" />
+  </svg>
+)
+
+/** 停止：圆角方块 —— 与「开始」成对；同一颗按钮里两者只出现其一。 */
+export const IconStop = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="6.3" y="6.3" width="11.4" height="11.4" rx="2.2" />
+  </svg>
+)
+
 export const IconSettings = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="3.2" />

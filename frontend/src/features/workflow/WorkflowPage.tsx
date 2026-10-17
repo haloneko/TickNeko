@@ -10,6 +10,7 @@ import {
   listWorkflows,
   publishWorkflow,
   renameWorkflow,
+  setWorkflowEnabled,
   type WorkflowData,
 } from './workflowApi'
 import { fetchOwners, type Owner } from '../../lib/ownersApi'
@@ -30,11 +31,13 @@ import {
 import TableFrame from '../../common/TableFrame'
 import {
   IconEdit,
+  IconPlay,
   IconPlus,
   IconPublish,
   IconRefresh,
   IconRename,
   IconSettings,
+  IconStop,
   IconTrash,
 } from '../../common/icons'
 import WorkflowCreateDialog from './WorkflowCreateDialog'
@@ -55,8 +58,6 @@ function formatTime(unixSeconds: number): string {
 }
 
 function statusLabel(w: WorkflowData): { text: string; cls: string } {
-  // 已生效用公共的 chip-success（浅绿底 + 深绿字 + 同色描边），草稿用 .chip 本来的中性灰。
-  // 两边共用同一套胶囊尺寸，只靠颜色区分生命周期 —— 不再自己写一份 .published / .draft
   if (w.status === 'published') return { text: '已发布', cls: 'chip-success' }
   return { text: '草稿', cls: '' }
 }
@@ -64,10 +65,10 @@ function statusLabel(w: WorkflowData): { text: string; cls: string } {
 /* 占位高度（TEXT_H / BADGE_H）与表头都来自 common/Skeleton：变量页是同一套表格版式，
    两页共用一份「层高」与「列宽 + 表头」的机制，只有列配置各自保留。 */
 
-/* 操作列是 5 个纯图标按钮（编辑 / 设置 / 重命名 / 发布最新版 / 删除）。尺寸与间距不另立一套，
-   直接取公共 .icon-btn 与 .rowActions 的值，骨架就照这两个数铺 —— 按钮换了大小（原来是带
-   文案的 .btn，宽 74~100）骨架自动跟上，不会在骨架里留一份旧尺寸。 */
-const ACTIONS = 5
+/* 操作列是 6 个纯图标按钮（开始·停止 / 编辑 / 设置 / 重命名 / 发布最新版 / 删除）。尺寸与间距
+   不另立一套，直接取公共 .icon-btn 与 .rowActions 的值，骨架就照这两个数铺 —— 按钮换了大小
+   （原来是带文案的 .btn，宽 74~100）骨架自动跟上，不会在骨架里留一份旧尺寸。 */
+const ACTIONS = 6
 const ACTION_ICON = 38 // .icon-btn 的边长
 const ACTION_GAP = 4 // .rowActions 的 gap
 
@@ -118,7 +119,7 @@ const COLUMNS: TableColumn[] = [
     skeleton: () => <SkeletonText width={104} height={TEXT_H} />,
   },
   {
-    label: '操作', // 5 个图标按钮 + 4 个间距 = 222，加单元格左右内边距 36
+    label: '操作', // 6 个图标按钮 + 5 个间距 = 248，加单元格左右内边距 36
     width: ACTIONS * ACTION_ICON + (ACTIONS - 1) * ACTION_GAP + 36,
     alignRight: true,
     skeleton: () => (
@@ -203,6 +204,21 @@ export default function WorkflowPage() {
       setItems((list) => list.map((w) => (w.id === id ? data : w)))
     } catch (err) {
       pushToast('error', describe(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 拨**运行开关**：发布 ≠ 运行 —— 拨开才真的按已发布版本跑（默认关）。 */
+  async function toggleEnabled(w: WorkflowData) {
+    const next = !w.enabled
+    setBusy(true)
+    try {
+      const { data } = await setWorkflowEnabled(w.id, next)
+      pushToast('success', next ? `已开启：${w.name}` : `已停止：${w.name}`)
+      setItems((list) => list.map((item) => (item.id === data.id ? data : item)))
+    } catch (err) {
+      pushToast('error', describe(err))  // 还没发布过就拨开：后端 409
     } finally {
       setBusy(false)
     }
@@ -361,6 +377,24 @@ export default function WorkflowPage() {
                   <div className={styles.rowActions}>
                     {/* 纯图标：文案进 title（悬停看）与 aria-label（读屏器听），
                         两者都写 —— 只给 title 的话键盘 focus 与触屏都拿不到名字 */}
+                    {/* 运行开关：同一颗按钮，停着显示「开始」、跑着显示「停止」，点一次翻一次。
+                        刻意不染色 —— 行里那颗绿点已经在说「正在跑」，再染一遍是同一句话说两遍；
+                        三角 / 方块本身就够区分 */}
+                    <button
+                      className="icon-btn"
+                      disabled={busy || w.published_version === 0}
+                      onClick={() => void toggleEnabled(w)}
+                      title={
+                        w.published_version === 0
+                          ? '还没发布过版本，跑不起来 —— 先发布一版'
+                          : w.enabled
+                            ? '单击停止'
+                            : '单击开始'
+                      }
+                      aria-label={w.enabled ? '停止运行' : '开始运行'}
+                    >
+                      {w.enabled ? <IconStop size={16} /> : <IconPlay size={16} />}
+                    </button>
                     <button
                       className="icon-btn"
                       disabled={busy}
