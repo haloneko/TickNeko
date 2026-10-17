@@ -41,43 +41,14 @@
   min-width: 0;
 }
 
-/* 列表区是横向滚动容器：列宽一旦定死（.table 的 min-width = 各列权重之和），
-   窄屏就靠这里滚 —— 没有它，超出的部分会被 .panel 的 overflow: hidden 直接裁掉
-   （右侧「操作」看得见却点不到）。 */
-.tableWrap {
-  overflow-x: auto;
-}
-
-
+/* 横向滚动容器、表头、单元格、行悬停、行淡入都在 common/TableFrame.module.css 里（两页共用）——
+   原先这十几条在这儿和变量页各写一遍，逐字相同，于是「行悬停」只在变量页有、这页悄悄少了。
+   这里只留这一页的列宽下限：各列权重之和 =
+   130 + 240 + 100 + 86 + 96 + 96 + 168 + 284
+   （操作列 = 6 个 38 的图标按钮 + 5 个 4px 间隙 + 单元格内边距 36 = 284）。
+   改 COLUMNS 的权重就要跟着改这一行。 */
 .table {
-  width: 100%;
-  min-width: 1158px;
-  table-layout: fixed;
-  border-collapse: collapse;
-}
-.table th {
-  text-align: left;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-3);
-  padding: 10px 18px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.table td {
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-  vertical-align: middle;
-}
-.table tr:last-child td {
-  border-bottom: none;
-}
-/* 行淡入：骨架一撤、真实行直接「啪」地出现太生硬。动画挂在行上（新 key 会重建元素，
-   于是换归属筛选也是淡入）；prefers-reduced-motion 时被 base.css 全局压成瞬时。 */
-.table tbody tr {
-  animation: fade-in 0.24s var(--ease-out);
+  min-width: 1200px;
 }
 
 /* 面板头右侧：归属筛选 + 「新建」并排（筛选只有管理员看得到，普通用户它就整体不渲染） */

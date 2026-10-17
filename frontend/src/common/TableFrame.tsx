@@ -19,14 +19,14 @@ import {
   type TableColumn,
 } from './Skeleton'
 import { loadingView, useLoadingPhase } from './useLoadingPhase'
+import styles from './TableFrame.module.css'
 
 interface TableFrameProps {
   /** 列配置：真实行与骨架行共用同一份（列序 / 列宽 / 单元格 class / 占位内容） */
   columns: readonly TableColumn[]
-  /** 表格自身的 class：列宽之外的行高 / 内边距 / 边框都在它里面 */
+  /** 表格自身的 class：只放页面自己的东西（现在只剩 min-width = 各列权重之和）——
+      表头 / 单元格 / 行悬停 / 行淡入都在 TableFrame 自己的样式里，不要再各页写一份 */
   tableClassName: string
-  /** 横向滚动容器（窄屏靠它滚，别让外层卡片把右侧的「操作」裁掉）；不传就不套 */
-  wrapClassName?: string
   /** 正在取数 */
   loading: boolean
   /** 归一后的错误；非空且相位落定后整块换成错误态 */
@@ -50,7 +50,6 @@ interface TableFrameProps {
 export default function TableFrame({
   columns,
   tableClassName,
-  wrapClassName,
   loading,
   error,
   isEmpty = false,
@@ -73,9 +72,9 @@ export default function TableFrame({
       ) : view === 'empty' ? (
         empty
       ) : (
-        <div className={wrapClassName}>
+        <div className={styles.wrap}>
           {/* aria-busy 标在「内容会变的那张表」上：加载中它仍是同一张表、同一个表头 */}
-          <table className={tableClassName} aria-busy={phase.active}>
+          <table className={`${styles.table} ${tableClassName}`} aria-busy={phase.active}>
             <TableHeader columns={columns} />
             <tbody>
               {view === 'skeleton' ? (

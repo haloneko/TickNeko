@@ -342,7 +342,6 @@ export default function VariablesPage() {
         <TableFrame
           columns={columns}
           tableClassName={styles.table}
-          wrapClassName={styles.tableWrap}
           loading={query.loading}
           error={query.error}
           isEmpty={query.items.length === 0}

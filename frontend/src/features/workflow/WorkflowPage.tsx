@@ -288,7 +288,6 @@ export default function WorkflowPage() {
         <TableFrame
           columns={COLUMNS}
           tableClassName={styles.table}
-          wrapClassName={styles.tableWrap}
           loading={loading}
           isEmpty={items.length === 0}
           onRetry={() => void load()}
