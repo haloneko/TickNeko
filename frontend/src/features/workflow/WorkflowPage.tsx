@@ -243,8 +243,8 @@ export default function WorkflowPage() {
         <div>
           <h2 className={styles.title}>工作流</h2>
           <p className={styles.desc}>
-            用节点 + 连线编排自动化流程：开始节点支持时间触发（cron）与消息触发，
-            搭配日志 / 测试等节点，校验通过后保存版本，发布即生效。
+            拖节点、连线，就是一条自动化流程。开始节点决定什么时候跑（定时或收到消息），
+            后面的节点干活；校验通过后存成版本，发布即生效。
           </p>
         </div>
         <button
@@ -298,7 +298,7 @@ export default function WorkflowPage() {
               title={canCreate ? '还没有工作流' : '这个归属下还没有工作流'}
               hint={
                 canCreate
-                  ? '用节点 + 连线编排自动化流程：开始节点支持时间触发（cron）与消息触发，搭配日志 / 测试节点。'
+                  ? '新建后拖节点、连线，校验通过就能存成版本。'
                   : '切回「全部」或自己的归属才能新建；别人名下的流只能查看与编辑。'
               }
               action={
