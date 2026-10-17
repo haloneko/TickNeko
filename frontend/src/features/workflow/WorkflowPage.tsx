@@ -10,7 +10,6 @@ import {
   listWorkflows,
   publishWorkflow,
   renameWorkflow,
-  setWorkflowEnabled,
   type WorkflowData,
 } from './workflowApi'
 import { fetchOwners, type Owner } from '../../lib/ownersApi'
@@ -56,8 +55,10 @@ function formatTime(unixSeconds: number): string {
 }
 
 function statusLabel(w: WorkflowData): { text: string; cls: string } {
-  if (w.status === 'published') return { text: '已发布', cls: styles.published }
-  return { text: '草稿', cls: styles.draft }
+  // 已生效用公共的 chip-success（浅绿底 + 深绿字 + 同色描边），草稿用 .chip 本来的中性灰。
+  // 两边共用同一套胶囊尺寸，只靠颜色区分生命周期 —— 不再自己写一份 .published / .draft
+  if (w.status === 'published') return { text: '已发布', cls: 'chip-success' }
+  return { text: '草稿', cls: '' }
 }
 
 /* 占位高度（TEXT_H / BADGE_H）与表头都来自 common/Skeleton：变量页是同一套表格版式，
@@ -97,12 +98,12 @@ const COLUMNS: TableColumn[] = [
     skeleton: (i) => <SkeletonChip width={i % 2 ? 46 : 58} height={BADGE_H} />,
   },
   {
-    label: '运行', // 开关 38 + 间距 8 + 文案 36 = 82
-    width: 128,
+    label: '运行', // 圆点 8 + 间距 6 + 文案 36 = 50，加单元格内边距 36 → 86
+    width: 86,
     skeleton: () => (
       <span className={styles.skelSwitch}>
-        {/* 38×22 是公共 .switch 的轨道尺寸，它不是一个文字条，故不并入 TEXT_H */}
-        <SkeletonChip width={38} height={22} />
+        {/* 圆点是 8 的正圆，不是文字条，故不并入 TEXT_H */}
+        <SkeletonBox size={8} round />
         <SkeletonText width={36} height={TEXT_H} />
       </span>
     ),
@@ -202,21 +203,6 @@ export default function WorkflowPage() {
       setItems((list) => list.map((w) => (w.id === id ? data : w)))
     } catch (err) {
       pushToast('error', describe(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  /** 拨**运行开关**：发布 ≠ 运行 —— 拨开才真的按已发布版本跑（默认关）。 */
-  async function toggleEnabled(w: WorkflowData) {
-    const next = !w.enabled
-    setBusy(true)
-    try {
-      const { data } = await setWorkflowEnabled(w.id, next)
-      pushToast('success', next ? `已开启：${w.name}` : `已停止：${w.name}`)
-      setItems((list) => list.map((item) => (item.id === data.id ? data : item)))
-    } catch (err) {
-      pushToast('error', describe(err))  // 还没发布过就拨开：后端 409
     } finally {
       setBusy(false)
     }
@@ -343,32 +329,33 @@ export default function WorkflowPage() {
                   <span className={`chip ${st.cls}`}>{st.text}</span>
                 </td>
                 <td>
-                  <label
-                    className={styles.switch}
+                  {/* 只展示：开关在编辑器工具栏里（发布 ≠ 运行，在列表里误触一次就是停掉定时触发） */}
+                  <span
+                    className={`${styles.runBadge} ${w.enabled ? styles.runOn : styles.runOff}`}
                     title={
                       w.published_version === 0
-                        ? '先发布一版，才能拨运行开关'
+                        ? '还没发布过版本，跑不起来 —— 先发布一版'
                         : w.enabled
-                          ? '点一下停止：不再定时触发（发布状态不变）'
-                          : '点一下开启：按已发布版本跑'
+                          ? '运行中：按已发布版本定时触发（开关在编辑器里）'
+                          : '已停止：不再定时触发（开关在编辑器里）'
                     }
                   >
-                    <input
-                      type="checkbox"
-                      checked={w.enabled}
-                      disabled={busy || w.published_version === 0}
-                      onChange={() => void toggleEnabled(w)}
-                    />
-                    <span className={`switch ${w.enabled ? 'switch-on' : ''}`}>
-                      <span className="switch-knob" />
-                    </span>
-                    <span className={styles.switchText}>
-                      {w.enabled ? '运行中' : '已停止'}
-                    </span>
-                  </label>
+                    <span className={styles.runDot} />
+                    {w.enabled ? '运行中' : '已停止'}
+                  </span>
                 </td>
-                <td>v{w.current_version}</td>
-                <td>{w.published_version > 0 ? `v${w.published_version}` : '—'}</td>
+                <td>
+                  <span className={styles.version}>v{w.current_version}</span>
+                </td>
+                <td>
+                  {w.published_version > 0 ? (
+                    <span className={`${styles.version}`}>
+                      v{w.published_version}
+                    </span>
+                  ) : (
+                    <span className={styles.versionNone}>—</span>
+                  )}
+                </td>
                 <td className={styles.muted}>{formatTime(w.updated_at)}</td>
                 <td>
                   <div className={styles.rowActions}>

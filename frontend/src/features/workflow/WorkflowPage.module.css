@@ -53,7 +53,7 @@
    不会被压到内容溢出单元格。 */
 .table {
   width: 100%;
-  min-width: 1200px;
+  min-width: 1158px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -121,13 +121,6 @@
 .muted {
   color: var(--text-3);
 }
-.published {
-  color: var(--success);
-  background: var(--success-soft);
-}
-.draft {
-  color: var(--text-2);
-}
 
 /* 行内操作：5 个图标按钮。间隙比 .btn 那会儿紧一半 —— .icon-btn 的方框里已经留了
    11px 空白（38 的框只放 16 的图标），再叠 8px 的 gap 看着就是一盘散珠。
@@ -138,11 +131,56 @@
   justify-content: flex-end;
   gap: 4px;
 }
-/* 骨架表的「运行」单元格：铺开开关 + 文案的占位，间距对齐 .switch 的 gap */
+
+/* ---- 状态 / 版本 / 运行：这三列只做展示，颜色就是语义 ----
+   「已发布」借公共 .chip-success（浅绿底 + 深绿字 + 同色描边），「草稿」用 .chip 本来的
+   中性灰 —— 两边共用同一套胶囊尺寸，只靠颜色区分生命周期。原先这里是「绿字 + 绿底但灰描边」，
+   描边一灰，整颗读起来就是灰的。 */
+
+/* 运行状态：圆点 + 文字。开关放在编辑器工具栏里，列表只展示（发布 ≠ 运行，别在表格里误触） */
+.runBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.runDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.runOn {
+  color: var(--text-1);
+}
+.runOn .runDot {
+  background: var(--success);
+  /* 跑着的那颗带一圈极淡的光晕，扫一列时先看到它 */
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+.runOff {
+  color: var(--text-3);
+}
+.runOff .runDot {
+  background: var(--text-3);
+}
+
+/* 版本号：等宽 + tabular-nums，扫一列时位数对得齐 */
+.version {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+/* 还没发布过：弱化成次要信息，不跟真版本号抢注意力 */
+.versionNone {
+  color: var(--text-3);
+}
+
+/* 骨架表的「运行」单元格：圆点 + 文案的占位，间距对齐 .runBadge 的 gap */
 .skelSwitch {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .failure {
   margin-bottom: 16px;
@@ -152,32 +190,4 @@
   background: var(--danger-bg);
   color: var(--danger);
   font-size: 13px;
-}
-/* 运行开关：发布 ≠ 运行 —— 拨开才真的跑（默认关）。
-   轨道 / 圆点走公共类 .switch / .switch-knob，这里只留 label 布局与禁用态 */
-.switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-}
-.switch input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-.switch input:focus-visible + :global(.switch) {
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.switch input:disabled + :global(.switch) {
-  opacity: 0.45;
-}
-.switch input:disabled ~ .switchText {
-  color: var(--text-3);
-}
-.switchText {
-  font-size: 12px;
-  color: var(--text-2);
 }
