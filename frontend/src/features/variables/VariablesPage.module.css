@@ -85,18 +85,6 @@
   border-color: var(--accent-border);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-select.control {
-  appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
-    linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
-  background-position:
-    calc(100% - 16px) 52%,
-    calc(100% - 11px) 52%;
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
-  padding-right: 28px;
-}
-
 .filterActions {
   display: flex;
   align-items: center;
@@ -116,46 +104,12 @@ select.control {
 .stateIcon {
   opacity: 0.45;
 }
-.tableWrap {
-  overflow-x: auto;
-}
-/* 列宽由表头（COLUMNS 的权重）决定，不由内容决定 —— 骨架表与真实表共用同一个表头，
-   于是两边的列宽逐像素相同：数据回来后既不换列宽，也不会为塞下长文案而变宽
-   （长文案在各自单元格里截尾，悬停看全）。min-width 取各列权重之和，
-   保证窄屏时列不会被压到内容溢出单元格；真放不下就由 .tableWrap 横向滚动。 */
+/* 横向滚动容器、表头、单元格、行悬停、行淡入都在 common/TableFrame.module.css 里（两页共用）——
+   原先这十几条在这儿和工作流页各写一遍，逐字相同，于是「行悬停」只有这页有、工作流页悄悄少了。
+   这里只留这一页的列宽下限：各列权重之和 = 96 + 240 + 130 + 136 + 168 + 100 + 116。
+   改 COLUMNS 的权重就要跟着改这一行。 */
 .table {
-  width: 100%;
   min-width: 986px;
-  table-layout: fixed;
-  border-collapse: collapse;
-}
-.table th {
-  text-align: left;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-3);
-  padding: 10px 18px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.table td {
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-  vertical-align: middle;
-}
-.table tr:last-child td {
-  border-bottom: none;
-}
-/* 行淡入：骨架一撤、真实行直接「啪」地出现太生硬。动画挂在行上（新 key 会重建元素，
-   于是翻页 / 换筛选也是淡入）；prefers-reduced-motion 时被 base.css 全局压成瞬时。 */
-.table tbody tr {
-  animation: fade-in 0.24s var(--ease-out);
-}
-/* 行悬停：给整行一层淡淡的强调，方便横向扫读 */
-.table tbody tr:hover td {
-  background: var(--nav-hover-bg);
 }
 
 /* 作用域徽标：图级走强调色，账号级走中性色 */

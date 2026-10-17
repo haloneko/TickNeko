@@ -20,6 +20,7 @@ import { searchLogs, clearLogs, LOG_LEVELS, type LogEntry } from './logsApi'
 import { fetchOwners, type Owner } from '../../lib/ownersApi'
 import { useAuth } from '../auth/authStore'
 import OwnerFilter, { ownerName } from '../../common/OwnerFilter'
+import SelectMenu from '../../common/SelectMenu'
 import { IconRefresh, IconChevronDown, IconAlert, IconClock, IconTrash } from '../../common/icons'
 import { PagerSkeleton, SkeletonBox, SkeletonChip, SkeletonText } from '../../common/Skeleton'
 import LoadingRegion from '../../common/LoadingRegion'
@@ -331,21 +332,16 @@ export default function LogsPage() {
       {/* 筛选栏 */}
       <form className={`card ${styles.filterCard}`} onSubmit={submitSearch}>
         <div className={styles.filterGrid}>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>级别</span>
-            <select
-              className={styles.control}
-              value={draft.level}
-              onChange={(e) => patchDraft({ level: e.target.value })}
-            >
-              <option value="">全部级别</option>
-              {LOG_LEVELS.map((lv) => (
-                <option key={lv} value={lv}>
-                  {lv}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SelectMenu
+            layout="vertical"
+            label="级别"
+            value={draft.level}
+            onChange={(level) => patchDraft({ level })}
+            options={[
+              { value: '', label: '全部级别' },
+              ...LOG_LEVELS.map((lv) => ({ value: lv, label: lv })),
+            ]}
+          />
 
           <label className={styles.field}>
             <span className={styles.fieldLabel}>关键字（正文模糊）</span>
@@ -382,20 +378,17 @@ export default function LogsPage() {
                 layout="vertical"
               />
 
-              <label className={styles.field}>
-                <span className={styles.fieldLabel}>来源</span>
-                <select
-                  className={styles.control}
-                  value={draft.source}
-                  onChange={(e) =>
-                    patchDraft({ source: e.target.value as Filters['source'] })
-                  }
-                >
-                  <option value="database">落库（默认）</option>
-                  <option value="local">本机文件</option>
-                  <option value="both">落库 + 本机文件</option>
-                </select>
-              </label>
+              <SelectMenu
+                layout="vertical"
+                label="来源"
+                value={draft.source}
+                onChange={(source) => patchDraft({ source: source as Filters['source'] })}
+                options={[
+                  { value: 'database', label: '落库（默认）' },
+                  { value: 'local', label: '本机文件' },
+                  { value: 'both', label: '落库 + 本机文件' },
+                ]}
+              />
             </>
           )}
 

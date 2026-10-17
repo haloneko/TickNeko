@@ -41,45 +41,14 @@
   min-width: 0;
 }
 
-/* 列表区是横向滚动容器：列宽一旦定死（.table 的 min-width = 各列权重之和），
-   窄屏就靠这里滚 —— 没有它，超出的部分会被 .panel 的 overflow: hidden 直接裁掉
-   （右侧「操作」看得见却点不到）。 */
-.tableWrap {
-  overflow-x: auto;
-}
-/* 列宽由表头（COLUMNS 的权重）决定，不由内容决定 —— 骨架表与真实表共用同一个表头，
-   于是两边的列宽逐像素相同：数据回来后既不换列宽，也不会为塞下长名字 / 5 个图标按钮变宽
-   （长内容在各自单元格里截尾，悬停看全）。min-width 取各列权重之和，保证窄屏时列
-   不会被压到内容溢出单元格。 */
+/* 横向滚动容器、表头、单元格、行悬停、行淡入都在 common/TableFrame.module.css 里（两页共用）——
+   原先这十几条在这儿和变量页各写一遍，逐字相同，于是「行悬停」只在变量页有、这页悄悄少了。
+   这里只留这一页的列宽下限：各列权重之和 =
+   130 + 240 + 100 + 86 + 96 + 96 + 168 + 284
+   （操作列 = 6 个 38 的图标按钮 + 5 个 4px 间隙 + 单元格内边距 36 = 284）。
+   改 COLUMNS 的权重就要跟着改这一行。 */
 .table {
-  width: 100%;
   min-width: 1200px;
-  table-layout: fixed;
-  border-collapse: collapse;
-}
-.table th {
-  text-align: left;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-3);
-  padding: 10px 18px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.table td {
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-  vertical-align: middle;
-}
-.table tr:last-child td {
-  border-bottom: none;
-}
-/* 行淡入：骨架一撤、真实行直接「啪」地出现太生硬。动画挂在行上（新 key 会重建元素，
-   于是换归属筛选也是淡入）；prefers-reduced-motion 时被 base.css 全局压成瞬时。 */
-.table tbody tr {
-  animation: fade-in 0.24s var(--ease-out);
 }
 
 /* 面板头右侧：归属筛选 + 「新建」并排（筛选只有管理员看得到，普通用户它就整体不渲染） */
@@ -121,13 +90,6 @@
 .muted {
   color: var(--text-3);
 }
-.published {
-  color: var(--success);
-  background: var(--success-soft);
-}
-.draft {
-  color: var(--text-2);
-}
 
 /* 行内操作：5 个图标按钮。间隙比 .btn 那会儿紧一半 —— .icon-btn 的方框里已经留了
    11px 空白（38 的框只放 16 的图标），再叠 8px 的 gap 看着就是一盘散珠。
@@ -138,11 +100,56 @@
   justify-content: flex-end;
   gap: 4px;
 }
-/* 骨架表的「运行」单元格：铺开开关 + 文案的占位，间距对齐 .switch 的 gap */
+
+/* ---- 状态 / 版本 / 运行：这三列只做展示，颜色就是语义 ----
+   「已发布」借公共 .chip-success（浅绿底 + 深绿字 + 同色描边），「草稿」用 .chip 本来的
+   中性灰 —— 两边共用同一套胶囊尺寸，只靠颜色区分生命周期。原先这里是「绿字 + 绿底但灰描边」，
+   描边一灰，整颗读起来就是灰的。 */
+
+/* 运行状态：圆点 + 文字。开关放在编辑器工具栏里，列表只展示（发布 ≠ 运行，别在表格里误触） */
+.runBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.runDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.runOn {
+  color: var(--text-1);
+}
+.runOn .runDot {
+  background: var(--success);
+  /* 跑着的那颗带一圈极淡的光晕，扫一列时先看到它 */
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+.runOff {
+  color: var(--text-3);
+}
+.runOff .runDot {
+  background: var(--text-3);
+}
+
+/* 版本号：等宽 + tabular-nums，扫一列时位数对得齐 */
+.version {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+/* 还没发布过：弱化成次要信息，不跟真版本号抢注意力 */
+.versionNone {
+  color: var(--text-3);
+}
+
+/* 骨架表的「运行」单元格：圆点 + 文案的占位，间距对齐 .runBadge 的 gap */
 .skelSwitch {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .failure {
   margin-bottom: 16px;
@@ -152,32 +159,4 @@
   background: var(--danger-bg);
   color: var(--danger);
   font-size: 13px;
-}
-/* 运行开关：发布 ≠ 运行 —— 拨开才真的跑（默认关）。
-   轨道 / 圆点走公共类 .switch / .switch-knob，这里只留 label 布局与禁用态 */
-.switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-}
-.switch input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-.switch input:focus-visible + :global(.switch) {
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.switch input:disabled + :global(.switch) {
-  opacity: 0.45;
-}
-.switch input:disabled ~ .switchText {
-  color: var(--text-3);
-}
-.switchText {
-  font-size: 12px;
-  color: var(--text-2);
 }

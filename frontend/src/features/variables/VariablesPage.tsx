@@ -25,6 +25,7 @@ import { fetchOwners, type Owner } from '../../lib/ownersApi'
 import { ApiRequestError } from '../../lib/http'
 import { useAuth } from '../auth/authStore'
 import OwnerFilter, { ownerName } from '../../common/OwnerFilter'
+import SelectMenu from '../../common/SelectMenu'
 import { ConfirmDialog } from '../../common/ConfirmDialog'
 import { IconPlus, IconRefresh, IconTrash, IconVariables } from '../../common/icons'
 import {
@@ -275,21 +276,19 @@ export default function VariablesPage() {
       {/* 筛选栏 */}
       <form className={`card ${styles.filterCard}`} onSubmit={submitSearch}>
         <div className={styles.filterGrid}>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>作用域</span>
-            <select
-              className={styles.control}
-              value={draft.scope}
-              onChange={(e) => patchDraft({ scope: e.target.value })}
-            >
-              <option value="">全部作用域</option>
-              {VARIABLE_SCOPES.map((scope) => (
-                <option key={scope} value={scope}>
-                  {SCOPE_LABELS[scope] ?? scope}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SelectMenu
+            layout="vertical"
+            label="作用域"
+            value={draft.scope}
+            onChange={(scope) => patchDraft({ scope })}
+            options={[
+              { value: '', label: '全部作用域' },
+              ...VARIABLE_SCOPES.map((scope) => ({
+                value: scope,
+                label: SCOPE_LABELS[scope] ?? scope,
+              })),
+            ]}
+          />
 
           <label className={styles.field}>
             <span className={styles.fieldLabel}>变量名（模糊）</span>
@@ -342,7 +341,6 @@ export default function VariablesPage() {
         <TableFrame
           columns={columns}
           tableClassName={styles.table}
-          wrapClassName={styles.tableWrap}
           loading={query.loading}
           error={query.error}
           isEmpty={query.items.length === 0}

@@ -31,11 +31,13 @@ import {
 import TableFrame from '../../common/TableFrame'
 import {
   IconEdit,
+  IconPlay,
   IconPlus,
   IconPublish,
   IconRefresh,
   IconRename,
   IconSettings,
+  IconStop,
   IconTrash,
 } from '../../common/icons'
 import WorkflowCreateDialog from './WorkflowCreateDialog'
@@ -56,17 +58,17 @@ function formatTime(unixSeconds: number): string {
 }
 
 function statusLabel(w: WorkflowData): { text: string; cls: string } {
-  if (w.status === 'published') return { text: '已发布', cls: styles.published }
-  return { text: '草稿', cls: styles.draft }
+  if (w.status === 'published') return { text: '已发布', cls: 'chip-success' }
+  return { text: '草稿', cls: '' }
 }
 
 /* 占位高度（TEXT_H / BADGE_H）与表头都来自 common/Skeleton：变量页是同一套表格版式，
    两页共用一份「层高」与「列宽 + 表头」的机制，只有列配置各自保留。 */
 
-/* 操作列是 5 个纯图标按钮（编辑 / 设置 / 重命名 / 发布最新版 / 删除）。尺寸与间距不另立一套，
-   直接取公共 .icon-btn 与 .rowActions 的值，骨架就照这两个数铺 —— 按钮换了大小（原来是带
-   文案的 .btn，宽 74~100）骨架自动跟上，不会在骨架里留一份旧尺寸。 */
-const ACTIONS = 5
+/* 操作列是 6 个纯图标按钮（开始·停止 / 编辑 / 设置 / 重命名 / 发布最新版 / 删除）。尺寸与间距
+   不另立一套，直接取公共 .icon-btn 与 .rowActions 的值，骨架就照这两个数铺 —— 按钮换了大小
+   （原来是带文案的 .btn，宽 74~100）骨架自动跟上，不会在骨架里留一份旧尺寸。 */
+const ACTIONS = 6
 const ACTION_ICON = 38 // .icon-btn 的边长
 const ACTION_GAP = 4 // .rowActions 的 gap
 
@@ -97,12 +99,12 @@ const COLUMNS: TableColumn[] = [
     skeleton: (i) => <SkeletonChip width={i % 2 ? 46 : 58} height={BADGE_H} />,
   },
   {
-    label: '运行', // 开关 38 + 间距 8 + 文案 36 = 82
-    width: 128,
+    label: '运行', // 圆点 8 + 间距 6 + 文案 36 = 50，加单元格内边距 36 → 86
+    width: 86,
     skeleton: () => (
       <span className={styles.skelSwitch}>
-        {/* 38×22 是公共 .switch 的轨道尺寸，它不是一个文字条，故不并入 TEXT_H */}
-        <SkeletonChip width={38} height={22} />
+        {/* 圆点是 8 的正圆，不是文字条，故不并入 TEXT_H */}
+        <SkeletonBox size={8} round />
         <SkeletonText width={36} height={TEXT_H} />
       </span>
     ),
@@ -117,7 +119,7 @@ const COLUMNS: TableColumn[] = [
     skeleton: () => <SkeletonText width={104} height={TEXT_H} />,
   },
   {
-    label: '操作', // 5 个图标按钮 + 4 个间距 = 222，加单元格左右内边距 36
+    label: '操作', // 6 个图标按钮 + 5 个间距 = 248，加单元格左右内边距 36
     width: ACTIONS * ACTION_ICON + (ACTIONS - 1) * ACTION_GAP + 36,
     alignRight: true,
     skeleton: () => (
@@ -241,8 +243,8 @@ export default function WorkflowPage() {
         <div>
           <h2 className={styles.title}>工作流</h2>
           <p className={styles.desc}>
-            用节点 + 连线编排自动化流程：开始节点支持时间触发（cron）与消息触发，
-            搭配日志 / 测试等节点，校验通过后保存版本，发布即生效。
+            拖节点、连线，就是一条自动化流程。开始节点决定什么时候跑（定时或收到消息），
+            后面的节点干活；校验通过后存成版本，发布即生效。
           </p>
         </div>
         <button
@@ -286,7 +288,6 @@ export default function WorkflowPage() {
         <TableFrame
           columns={COLUMNS}
           tableClassName={styles.table}
-          wrapClassName={styles.tableWrap}
           loading={loading}
           isEmpty={items.length === 0}
           onRetry={() => void load()}
@@ -297,7 +298,7 @@ export default function WorkflowPage() {
               title={canCreate ? '还没有工作流' : '这个归属下还没有工作流'}
               hint={
                 canCreate
-                  ? '用节点 + 连线编排自动化流程：开始节点支持时间触发（cron）与消息触发，搭配日志 / 测试节点。'
+                  ? '新建后拖节点、连线，校验通过就能存成版本。'
                   : '切回「全部」或自己的归属才能新建；别人名下的流只能查看与编辑。'
               }
               action={
@@ -343,37 +344,56 @@ export default function WorkflowPage() {
                   <span className={`chip ${st.cls}`}>{st.text}</span>
                 </td>
                 <td>
-                  <label
-                    className={styles.switch}
+                  {/* 只展示：开关在编辑器工具栏里（发布 ≠ 运行，在列表里误触一次就是停掉定时触发） */}
+                  <span
+                    className={`${styles.runBadge} ${w.enabled ? styles.runOn : styles.runOff}`}
                     title={
                       w.published_version === 0
-                        ? '先发布一版，才能拨运行开关'
+                        ? '还没发布过版本，跑不起来 —— 先发布一版'
                         : w.enabled
-                          ? '点一下停止：不再定时触发（发布状态不变）'
-                          : '点一下开启：按已发布版本跑'
+                          ? '运行中：按已发布版本定时触发（开关在编辑器里）'
+                          : '已停止：不再定时触发（开关在编辑器里）'
                     }
                   >
-                    <input
-                      type="checkbox"
-                      checked={w.enabled}
-                      disabled={busy || w.published_version === 0}
-                      onChange={() => void toggleEnabled(w)}
-                    />
-                    <span className={`switch ${w.enabled ? 'switch-on' : ''}`}>
-                      <span className="switch-knob" />
-                    </span>
-                    <span className={styles.switchText}>
-                      {w.enabled ? '运行中' : '已停止'}
-                    </span>
-                  </label>
+                    <span className={styles.runDot} />
+                    {w.enabled ? '运行中' : '已停止'}
+                  </span>
                 </td>
-                <td>v{w.current_version}</td>
-                <td>{w.published_version > 0 ? `v${w.published_version}` : '—'}</td>
+                <td>
+                  <span className={styles.version}>v{w.current_version}</span>
+                </td>
+                <td>
+                  {w.published_version > 0 ? (
+                    <span className={`${styles.version}`}>
+                      v{w.published_version}
+                    </span>
+                  ) : (
+                    <span className={styles.versionNone}>—</span>
+                  )}
+                </td>
                 <td className={styles.muted}>{formatTime(w.updated_at)}</td>
                 <td>
                   <div className={styles.rowActions}>
                     {/* 纯图标：文案进 title（悬停看）与 aria-label（读屏器听），
                         两者都写 —— 只给 title 的话键盘 focus 与触屏都拿不到名字 */}
+                    {/* 运行开关：同一颗按钮，停着显示「开始」、跑着显示「停止」，点一次翻一次。
+                        刻意不染色 —— 行里那颗绿点已经在说「正在跑」，再染一遍是同一句话说两遍；
+                        三角 / 方块本身就够区分 */}
+                    <button
+                      className="icon-btn"
+                      disabled={busy || w.published_version === 0}
+                      onClick={() => void toggleEnabled(w)}
+                      title={
+                        w.published_version === 0
+                          ? '还没发布过版本，跑不起来 —— 先发布一版'
+                          : w.enabled
+                            ? '单击停止'
+                            : '单击开始'
+                      }
+                      aria-label={w.enabled ? '停止运行' : '开始运行'}
+                    >
+                      {w.enabled ? <IconStop size={16} /> : <IconPlay size={16} />}
+                    </button>
                     <button
                       className="icon-btn"
                       disabled={busy}
