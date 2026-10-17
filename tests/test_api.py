@@ -147,12 +147,28 @@ def app_with(**overrides: object) -> FastAPI:
     return create_app(replace(options, **overrides), hasher=_TEST_HASHER)
 
 
-async def drain(core: LogCore) -> None:
-    """等分发器把队列里的日志交给处理机，再刷缓冲。
+async def drain(core: LogCore, timeout: float = 3.0) -> None:
+    """等日志真的落盘再返回：队列排空、手上那批交完、各处理机缓冲写完。
 
-    写日志只是入队，落盘由分发器异步做：不先等一轮就直接 ``flush``，刷的是空缓冲。
+    写日志只是入队，落盘由分发器异步做：原先定长 sleep(0.1) 在 CI（xdist 并行 + 慢盘）
+    上偶尔不够，最后几条还没被取走就读片了。只看队列长度也不够 —— 分发器取走一批后
+    队列同样是空的（这就是 ``inflight`` 存在的理由）。所以三个条件都满足才返回，
+    最多等 timeout。
     """
-    await asyncio.sleep(0.1)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        await core.flush()
+        stats = core.stats
+        queue = stats["queue"]
+        settled: bool = (
+            queue["size"] == 0
+            and queue["inflight"] == 0
+            and not any(processor["pending"] for processor in stats["processors"])
+        )
+        if settled:
+            return
+        await asyncio.sleep(0.02)
     await core.flush()
 
 

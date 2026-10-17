@@ -100,6 +100,20 @@ class CollectingProcessor(BaseLogProcessor):
         self.stop_calls += 1
 
 
+class GatedProcessor(CollectingProcessor):
+    """写的时候卡在闸门上：用来看「分发器已取走、还没落盘」那一段。"""
+
+    name: str = "gated"
+
+    def __init__(self) -> None:
+        super().__init__(buffer_size=1)
+        self.gate: asyncio.Event = asyncio.Event()
+
+    async def write(self, records: list[LogRecord]) -> None:
+        await self.gate.wait()
+        await super().write(records)
+
+
 class BrokenStartProcessor(CollectingProcessor):
     """启动就失败的处理机，用于验证「单个通道启动失败不影响其它通道」。"""
 
@@ -141,6 +155,24 @@ class TestMinimalStartup:
         stats = ConsoleLogProcessor().stats
         assert stats["buffer_size"] == 1
         assert stats["flush_interval"] == 0
+
+    async def test_inflight_covers_the_hand_off_window(self) -> None:
+        """队列空了不等于已落盘：那批记在 ``inflight`` 上，等落盘的人得看它。"""
+        processor = GatedProcessor()
+        logger = LogCore(processors=[processor], console=False, dispatch_timeout=0.01)
+        await logger.start()
+        try:
+            logger.info("卡在闸门上")
+            assert await wait_until(lambda: logger.stats["queue"]["size"] == 0) is True
+            assert logger.stats["queue"]["inflight"] == 1  # 已出队、还没写
+            assert processor.received == []
+
+            processor.gate.set()
+            assert await wait_until(lambda: processor.received == ["卡在闸门上"]) is True
+            assert await wait_until(lambda: logger.stats["queue"]["inflight"] == 0) is True
+        finally:
+            processor.gate.set()
+            await logger.stop()
 
     async def test_log_before_start_waits_in_queue(self) -> None:
         stream = io.StringIO()
