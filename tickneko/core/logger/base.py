@@ -45,6 +45,8 @@ class QueueStats(TypedDict):
     maxsize: int
     dropped: int
     closed: bool
+    #: 已被分发器取走、还没交给处理机的条数：此时 ``size`` 已经归零，但日志还没落盘
+    inflight: int
 
 
 class DroppedStats(TypedDict):
@@ -237,6 +239,8 @@ class BaseLogger(_LevelMethodsMixin):
         self._queue: AsyncLogQueue = shared.queue
         self._dispatch_batch_size: int = dispatch_batch_size
         self._dispatch_timeout: float = dispatch_timeout
+        #: 分发器当前手上那批的条数（队列空 ≠ 已落盘，见 :class:`QueueStats`）
+        self._inflight: int = 0
         self._dispatcher_task: asyncio.Task[None] | None = None
         self._running: bool = False
         #: **默认目标**（没给自己的目标时都用它），按优先级排好
@@ -500,7 +504,13 @@ class BaseLogger(_LevelMethodsMixin):
                 self._dispatch_batch_size, self._dispatch_timeout
             )
             if batch:
-                await self._dispatch(batch)
+                # 取走就记账：这批还没交给处理机之前队列已经空了，外部靠这个数字
+                # 区分「真的写完了」与「分发器手上还压着一批」（测试等待落盘要用）
+                self._inflight = len(batch)
+                try:
+                    await self._dispatch(batch)
+                finally:
+                    self._inflight = 0
                 continue
             if self._queue.closed and self._queue.empty:
                 break
@@ -775,6 +785,7 @@ class BaseLogger(_LevelMethodsMixin):
                 "maxsize": self._queue.maxsize,
                 "dropped": queue_dropped,
                 "closed": self._queue.closed,
+                "inflight": self._inflight,
             },
             "processors": processors,
             # 两级缓冲都可能丢日志（队列满 + 处理机缓冲满），这里汇成一个视图，
