@@ -13,7 +13,40 @@ TickNeko 是一个可以自己部署的机器人框架。它在三件事上做�
 
 技术栈：后端 Python 3.12+（FastAPI / SQLModel），控制台 React + TypeScript。
 
-![](./docs/workflow.jpg)
+![工作流画布](./docs/workflow.jpg)
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/bot.jpg" width="100%" alt="机器人">
+<br><sub>机器人</sub>
+</td>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/debug.jpg" width="100%" alt="WS 调试">
+<br><sub>WS 调试</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/flowlist.jpg" width="100%" alt="工作流管理">
+<br><sub>工作流管理</sub>
+</td>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/varable.jpg" width="100%" alt="变量查看">
+<br><sub>变量查看</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/logined.jpg" width="100%" alt="登录设备管理">
+<br><sub>登录设备管理</sub>
+</td>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/node.jpg" width="100%" alt="丰富的节点">
+<br><sub>丰富的节点</sub>
+</td>
+</tr>
+</table>
 
 ## 启动
 
