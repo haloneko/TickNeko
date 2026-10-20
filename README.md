@@ -5,22 +5,53 @@
 ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)
 ![Node 20+](https://img.shields.io/badge/Node-20%2B-brightgreen.svg)
 
-TickNeko 是一个可视化拖拽制作聊天机器人，支持多种触发方式，支持多平台与多账号隔离，通过画布连线编排工作流节点，一个 Docker 镜像即可自部署前后端。
+TickNeko 是一个可以自己部署的机器人框架。它在三件事上做了抽象：
 
-**多种触发方式**:
-- 时间触发:到时间自动运行
-- 消息触发:收到消息自动运行
-- 事件触发:收到某个事件运行
+- **流程**：触发（收到消息 / 到了时间点）→ 加工（取字段、正则、算一算、判条件）→ 动作（回消息、调接口），全部在画布上连线完成。
+- **平台**：OneBot、Kook 的差别被抹平成同一套「规范化事件 + 能力协议」。
+- **地基**：异步日志（可检索、可多出口）、缓存（Redis 和进程内一套 API）、定时任务（cron，红黑树排程），开箱即用。
 
 技术栈：后端 Python 3.12+（FastAPI / SQLModel），控制台 React + TypeScript。
 
-![](./docs/workflow.jpg)
+![工作流画布](./docs/workflow.jpg)
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/bot.jpg" width="100%" alt="机器人">
+<br><sub>机器人</sub>
+</td>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/debug.jpg" width="100%" alt="WS 调试">
+<br><sub>WS 调试</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/flowlist.jpg" width="100%" alt="工作流管理">
+<br><sub>工作流管理</sub>
+</td>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/varable.jpg" width="100%" alt="变量查看">
+<br><sub>变量查看</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/logined.jpg" width="100%" alt="登录设备管理">
+<br><sub>登录设备管理</sub>
+</td>
+<td width="50%" valign="top">
+<img src="https://raw.githubusercontent.com/haloneko/TickNeko/refs/heads/img1/docs/node.jpg" width="100%" alt="丰富的节点">
+<br><sub>丰富的节点</sub>
+</td>
+</tr>
+</table>
 
 ## 启动
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate     # Windows
-pip install -r requirements.txt
 copy config.toml.example data\config.toml          # 改成自己的配置（Linux: cp config.toml.example data/config.toml）
 python app.py                                      # 后端 http://127.0.0.1:18080（读 data/config.toml，没有就按默认值跑）
 cd frontend && npm install && npm run dev          # 控制台 http://127.0.0.1:15173
@@ -63,7 +94,6 @@ scripts\build-all.bat --no-docker  :: 只打包产物，不碰 Docker
 
 ```bash
 pytest
-pytest -n 8   #并行测试，速度更快
 ```
 
 ## 前端打包
@@ -89,9 +119,16 @@ cd frontend && npm install && npm run build
 | OneBot | 反向 WebSocket | 框架做服务端（默认 16700），实现端连进来，靠握手令牌认归属 |
 | Kook | 正向 WebSocket | 框架做客户端，用 Bot Token 连网关；发消息走 REST |
 
-内置节点：
+这两个平台一正一反，正好验证了抽象是否站得住。加第三个平台只需要：写一个适配器（实现 `BotAdapter` 协议）+ 在 `bootstrap.py` 里装配一行，**接口层和工作流一行都不用改**。做法见 [docs/bridge/bridge.md](docs/bridge/bridge.md)。
 
+内置工作流节点：`start` / `end`、`log`、`test`、`constant`、`http`、`delay`、`json`、`regex`、`now`、`condition`、`send`、`onebot`、`operator`、`cache`、`target`。
 
+三个运行规则值得记住：
+
+- **值沿边流**：节点产出按输出端口名往下传，下游按入边接收，没有全局变量。
+- **执行看控制流**：节点要不要跑只看 `trigger` 入边 —— 数据边（`message` / `target`）只送值，
+  所以分流没走中的分支不会因为一条跨分支的数据边而误跑。
+- **失败分两类**：业务失败（算不出、取不到、对方报错）抛 `NodeFailure`，只停当前分支，别的支路照跑；环境问题（连不上、没接线、缺依赖）抛普通异常，整条流程中断并留下堆栈。
 
 自己写节点、写契约、写校验规则，见 [docs/workflow/workflow.md](docs/workflow/workflow.md)。
 
@@ -133,5 +170,4 @@ cd frontend && npm install && npm run build
 
 [Apache License 2.0](LICENSE) © 2026 TickNeko
 
-分发时带上 [`LICENSE`](LICENSE) 与 [`NOTICE`](NOTICE)（保留版权与署名）
-不得用 TickNeko 的名字或商标给派生作品背书。
+商用、闭源、改了自己发都行。条件只有两条 —— 分发时带上 [`LICENSE`](LICENSE) 与 [`NOTICE`](NOTICE)（保留版权与署名），以及第 6 条：不得用 TickNeko 的名字或商标给派生作品背书。
