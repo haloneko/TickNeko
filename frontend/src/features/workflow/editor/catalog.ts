@@ -18,6 +18,7 @@ import {
   type NodeCategorySpec,
   type NodeFieldSpec,
   type NodePortSpec,
+  type NodeRepeatInputsSpec,
   type NodeTypeSpec,
   type NodeCatalog,
   type PortType,
@@ -33,6 +34,7 @@ export type {
   NodeCategorySpec,
   NodeFieldSpec,
   NodePortSpec,
+  NodeRepeatInputsSpec,
   NodeTypeSpec,
   NodeCatalog,
   PortType,
@@ -253,28 +255,54 @@ export function installCatalog(catalog: NodeCatalog): NodeTypeSpec[] {
 
 /**
  * ``nodeDef`` 的推导结果缓存：一次渲染里每个节点都要算一遍（卡片 + 连线 + 框选），
- * 而结果只取决于**节点类型**（触发器拆成三个之后，不再有「形状随 config 变」的类型），
- * 装目录时才需要清。
+ * 而结果只取决于**节点类型**与**决定端口数量的那个字段**（``repeat_inputs.count_field``，
+ * 比如拼接节点的段数）—— 装目录时整体清空，段数变了按新键再算一次。
  */
 const DEF_CACHE = new Map<string, NodeTypeDef>()
 
 /**
- * 取节点类型定义（渲染用）：端口 / 字段 / 中文名 / 顺序 / 颜色全部来自后端目录（认不出的
- * 类型用兜底色），并按 config 处理上面说的两个固有例外。
+ * 段数口径：读不出整数就用 ``default_count``，再夹到 ``[min_count, max_count]``。
+ * **与后端 ``nodes/base.py`` 的 ``repeat_count`` 是同一算法**（改一边要同步另一边），
+ * 否则画布上画出来的口与后端认的对不上。
  */
-export function nodeDef(type: string, _config?: Record<string, unknown>): NodeTypeDef {
-  // ``_config`` 留着只为调用方签名不变：触发器拆成三个节点之后，**形状不再随 config 变**
-  // （以前 start 的端口要看 config.trigger），所以它不参与推导，也不进缓存键。
-  const key = type
+function repeatCount(raw: unknown, rule: NodeRepeatInputsSpec): number {
+  let value = rule.default_count
+  if (typeof raw === 'number' && Number.isInteger(raw)) value = raw
+  else if (typeof raw === 'string' && /^\s*[+-]?\d+\s*$/.test(raw)) value = Number.parseInt(raw, 10)
+  return Math.min(rule.max_count, Math.max(rule.min_count, value))
+}
+
+/** 这个节点实例**实际的输入端口**：静态声明 + 按段数展开的那组（顺序与后端一致）。 */
+function expandInputs(spec: NodeTypeSpec, config?: Record<string, unknown>): PortSpec[] {
+  const rule = spec.repeat_inputs
+  if (!rule) return spec.inputs
+  const count = repeatCount(config?.[rule.count_field], rule)
+  const parts: PortSpec[] = Array.from({ length: count }, (_, index) => ({
+    id: `${rule.prefix}${index + 1}`,
+    type: rule.type,
+    label: rule.label.replace('{n}', String(index + 1)),
+    required: rule.required,
+  }))
+  return [...spec.inputs, ...parts]
+}
+
+/**
+ * 取节点类型定义（渲染用）：端口 / 字段 / 中文名 / 顺序 / 颜色全部来自后端目录（认不出的
+ * 类型用兜底色）。端口**随 config 变**的只有 ``repeat_inputs`` 那组（段数在 config 里），
+ * 其余形状仍然固定 —— 缓存键把段数一起算进去。
+ */
+export function nodeDef(type: string, config?: Record<string, unknown>): NodeTypeDef {
+  const rule = CATALOG[type]?.repeat_inputs
+  const key = rule ? `${type}#${String(config?.[rule.count_field] ?? '')}` : type
   const cached = DEF_CACHE.get(key)
   if (cached) return cached
 
-  const def = computeNodeDef(type)
+  const def = computeNodeDef(type, config)
   DEF_CACHE.set(key, def)
   return def
 }
 
-function computeNodeDef(type: string): NodeTypeDef {
+function computeNodeDef(type: string, config?: Record<string, unknown>): NodeTypeDef {
   const spec = CATALOG[type]
   if (spec === undefined) {
     // 认不出的类型：不猜它的端口，只给一对触发口让它还能画出来（这是兜底，不是定义）
@@ -290,7 +318,8 @@ function computeNodeDef(type: string): NodeTypeDef {
     }
   }
 
-  const portIds = new Set([...spec.inputs, ...spec.outputs].map((port) => port.id))
+  const inputs = expandInputs(spec, config)
+  const portIds = new Set([...inputs, ...spec.outputs].map((port) => port.id))
   const defaults: Record<string, unknown> = {}
   for (const field of spec.fields) {
     if (field.has_default) defaults[field.name] = field.default
@@ -301,7 +330,7 @@ function computeNodeDef(type: string): NodeTypeDef {
     label: spec.label,
     color: spec.color || DEFAULT_COLOR,
     defaults,
-    inputs: spec.inputs,
+    inputs,
     outputs: spec.outputs,
     // 卡片底部的字段条：与端口同名的字段（log 的 message）是**数据入口**，值从线上来，
     // 卡片上不重复显示；其余字段（level / method / timeout / value…）是手填值，照实显示

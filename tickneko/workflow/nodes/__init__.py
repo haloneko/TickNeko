@@ -17,6 +17,7 @@
       condition.py       内置节点：condition（条件分支：true / false 双出口，引擎按选中出口剪枝）
       send.py            内置节点：send（把 message 发到 target 指向的会话：去向走 target 值端口 + 内容端口，走 ctx.gateway.reply；没有 target 就不发，回执不成功不打断流程）
       operator.py        内置节点：operator（算术：+ - * / %，结果文本化；算不出来送空串）
+      concat.py          内置节点：concat（文本拼接：段数由 config.parts 定，段端口 part1..partN 按数量展开）
       cache.py           内置节点：cache（变量存取：get / set；作用域账号 / 图，变量名即身份）
       ds_dict.py         内置节点：键值对系列（ds-dict-set 设值 / -get 取值 / -contains 查存在 / -remove 删除 / -keys 取键列表 / -length 条目数，一个节点一个动作，写动作隐式创建；变量名与键名都能接线或手填，每个节点从 obj_out 送出本次操作的变量名，接给下一个键值对节点就是同一个对象接着改）
       ds_container.py    内置节点：列表队列系列（ds-list-append 追加队尾 / -push-left 头插 / -get 按下标取 / -contains 查存在 / -pop 队尾弹出 / -pop-left 队头弹出 / -length 长度，一个节点一个动作，不用选动作；队列原子操作 O(1)，contains 走存在性索引）
@@ -84,7 +85,11 @@ from .base import (
     NodeRole,
     NodeSpec,
     PortSpec,
+    RepeatPorts,
+    input_ports,
     input_value,
+    repeat_count,
+    repeat_ports,
 )
 from .cache import exec_cache
 from .ds_dict import (
@@ -106,6 +111,7 @@ from .ds_container import (
 )
 from .ai_service import exec_ai_service
 from .port_types import PORT_TYPES, PortType, PortTypeDef
+from .concat import exec_concat
 from .condition import exec_condition
 from .constant import exec_constant
 from .delay import exec_delay
@@ -163,13 +169,17 @@ __all__ = [
     "NodeConfigValidator",
     "ConfigField",
     "PortSpec",
+    "RepeatPorts",
     "PortType",
     "PortTypeDef",
     "PORT_TYPES",
     "TRIGGER_PORT",
     "MISSING_DEFAULT",
     "NO_USER_ID",
+    "input_ports",
     "input_value",
+    "repeat_count",
+    "repeat_ports",
     # 注册表
     "register_executor",
     "register_node",
@@ -210,6 +220,7 @@ __all__ = [
     "exec_pack_kook",
     "exec_placeholder",
     "exec_operator",
+    "exec_concat",
     "exec_cache",
     "exec_ds_dict_set",
     "exec_ds_dict_get",

@@ -36,6 +36,7 @@ from .base import (
     NodeRole,
     NodeSpec,
     PortSpec,
+    RepeatPorts,
 )
 
 #: 节点类型名 -> 注册规格（执行器 + 字段规则 + 拓扑约束）
@@ -59,6 +60,7 @@ def register_executor(
     category: NodeCategory = "data",
     inputs: Sequence[PortSpec] = (),
     outputs: Sequence[PortSpec] = (),
+    repeat_inputs: RepeatPorts | None = None,
     variable_viewer: type[VariableViewer] | None = None,
 ) -> None:
     """注册某类型节点的执行函数及其校验规则；重复注册覆盖。
@@ -82,6 +84,7 @@ def register_executor(
         category=category,
         inputs=tuple(inputs),
         outputs=tuple(outputs),
+        repeat_inputs=repeat_inputs,
         variable_viewer=variable_viewer,
     )
     if variable_viewer is not None:
@@ -104,6 +107,7 @@ def declare_node_type(
     category: NodeCategory = "data",
     inputs: Sequence[PortSpec] = (),
     outputs: Sequence[PortSpec] = (),
+    repeat_inputs: RepeatPorts | None = None,
     variable_viewer: type[VariableViewer] | None = None,
 ) -> None:
     """只登记类型与校验规则、执行器留空。
@@ -127,6 +131,7 @@ def declare_node_type(
         category=category,
         inputs=tuple(inputs),
         outputs=tuple(outputs),
+        repeat_inputs=repeat_inputs,
         variable_viewer=variable_viewer,
     )
     if variable_viewer is not None:
@@ -149,6 +154,7 @@ def register_node(
     category: NodeCategory = "data",
     inputs: Sequence[PortSpec] = (),
     outputs: Sequence[PortSpec] = (),
+    repeat_inputs: RepeatPorts | None = None,
     variable_viewer: type[VariableViewer] | None = None,
 ) -> Callable[[NodeExecutor], NodeExecutor]:
     """装饰器写法：在节点函数上标类型与规则即完成注册。
@@ -186,6 +192,7 @@ def register_node(
             category=category,
             inputs=inputs,
             outputs=outputs,
+            repeat_inputs=repeat_inputs,
             variable_viewer=variable_viewer,
         )
         return executor
