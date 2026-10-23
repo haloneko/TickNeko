@@ -37,6 +37,7 @@ tickneko/workflow/
 │   ├── unpack.py        内置：unpack-onebot / unpack-kook（会话解包：把会话定位拆成字符串字段，号统一字符串化）
 │   ├── pack.py          内置：pack-onebot / pack-kook（会话封装：把字符串字段拼回会话定位，走 gateway.make_target）
 │   ├── operator.py      内置：operator（算术：+ - * / %；结果文本化，算不出来 = 业务失败）
+│   ├── concat.py        内置：concat（文本拼接：段数由 config.parts 定，段端口 part1..partN 按数量展开）
 │   ├── cache.py         内置：cache（变量存取：get / set；读不到回默认值；作用域账号 / 图，键 = 作用域 + 变量名）
 │   └── placeholder.py   内置：placeholder（占位：只透传不做事，参与画布理线）
 ├── graph.py         图的小工具：出边索引 / 可达集合 / 入口节点 / 边端口（校验器与运行器共用）
@@ -177,6 +178,7 @@ workflow_versions             每次保存一张不可变图快照
 | `unpack.py` | **会话解包**（`unpack-onebot` / `unpack-kook`）：把会话定位**拆成字符串字段**（平台 / 会话类型 / 会话号 / 发送者 / 消息号 / 归属），号统一字符串化（OneBot 整数 -> 字符串；缺的字段给空串）；收到**别平台**的 target 当场 `ValueError`（装配错位看得见）；没有会话定位送**全空串**、不打断流程 | `trigger` / `target` → `trigger` / `platform` / `chat` / `chat_id` / `user_id` / `message_id` / `owner_id` | 无（`target` 只能接线，不能手填 —— 会话定位是结构值） |
 | `pack.py` | **会话封装**（`pack-onebot` / `pack-kook`）：把字段**拼回**会话定位（unpack 的逆操作）—— 平台写死在节点上，走 `ctx.gateway.make_target`，适配器按平台口径转号；会话号不全不额外拦（reply 时说明缺什么）；没接总线 = 环境问题当场抛 | `trigger` / `chat` / `chat_id` → `trigger` / `target` | `chat`（group / private）、`chat_id`（**按会话类型解释的号**：群聊填群号 / 频道号，私聊填对方账号；都可接线，接上覆盖手填）。**只要这两样** —— 对方号由适配器用 `chat_id` 兜底，消息号是「撤回 / 引用回复」一类动作才要的 |
 | `operator.py` | **运算**：对两个操作数做一次算术（`+` / `-` / `*` / `/` / `%`）；`/` 是真除法、`%` 按 Python 语义，结果文本化（整数值不带小数点）；算不出来（空值 / 非数字 / 除数为 0 / 运算符不合法）= **业务失败**：抛 `NodeFailure`，停止向下传播 | `trigger` / `left` / `right` → `trigger` / `operator_result` | `left` / `right`（**入口**必填：接线或手填）、`operator`（缺省 `+`，枚举由自注册校验器把） |
+| `concat.py` | **文本拼接（不定长）**：段数由 `parts` 定（下拉 2 ~ 10），段端口 `part1` … `partN` **按数量展开**（`RepeatPorts`，改了段数画布上的口跟着变），按序号顺序接成一串（不按连线先后）；值统一文本化（`None` → 空串，其余 `str()`）；每段都是必填入口；**全段都空 = 业务失败**：抛 `NodeFailure`，停止向下传播（拼出空串往下送，下游会当成拿到内容了） | `trigger` / `part1` … `partN` → `trigger` / `text` | `parts`（段数，缺省 `2`，枚举由自注册校验器把）、`partN`（手填兜底，也能接线 —— 固定文案接常量节点更省事） |
 | `cache.py` | **缓存**：把一个变量存进缓存 / 取回来 —— **跨执行（跨工作流）传递状态**的通道；`get` 没取到不算事故（回 `default` 默认值，没填就是空串），`set` 空值 = 清成空串；`key` 入口没接线也没填 / 账号作用域却没有归属 → 当场抛；缓存键 = 作用域 + 变量名（`workflow:graph:{图 id}:{变量名}` / `workflow:acct:{账号 id}:{变量名}`，**没有前缀段**；写完向变量中枢报到，变量列表才看得到） | `trigger` / `key` / `value` / `default` → `trigger` / `cache_value` | `action`（缺省 `get`）、`scope`（缺省 `workflow`；枚举都由自注册校验器把）、`key`（**入口**必填：接线或手填）、`value`（手填兜底，也能接线）、`default`（`get` 读不到时的默认值，手填兜底 / 也能接线） |
 
 > **「入口」= 字段名与端口 id 同名的那个数据端口**：`log.message` / `http.url` / `http.body` 都能
@@ -302,7 +304,10 @@ config 里同名字段的手填值**，两者都没有才用 `default`。这是�
 - 数据入口用**普通名词**（`url` / `body` / `message`），并给同名字段留个手填兜底：画布会把
   「已接线 / 未接线」标出来，校验器只在「既没接线也没填」时才报 `INPUT_NOT_CONNECTED`；
 - **一个数据入口只允许一条入边**（`DUPLICATE_INPUT_EDGE`）：要合并多个上游，就先各自接到一个
-  中间节点，再从那一个节点往下送。
+  中间节点，再从那一个节点往下送；
+- **段数不定的节点用 `RepeatPorts`**（见 §5.6 ①）：数量写在 config 里、段端口按数量展开，
+  别硬编码两三个口 —— 执行时用 `repeat_count(node.config.get(...), 规则)` 取实际段数（口径与
+  画布一致）。
 
 ### 5.5 失败怎么处理：分两类
 
@@ -340,6 +345,7 @@ config 里同名字段的手填值**，两者都没有才用 `default`。这是�
 | 枚举字段 | `ConfigField("level", default="INFO", options=LOG_LEVEL_ORDER)` | 同上；`options` 只描述「有哪些可选值、按什么顺序显示」（画布渲染成下拉），校验仍归自定义校验器 |
 | 枚举显示名（下拉里显示中文） | `ConfigField("event_type", options=EVENT_TYPE_OPTIONS, option_labels=EVENT_TYPE_LABELS)` | `option_labels` 是「值 → 界面文字」：**值不改** —— 它可能要跟外部对上号（事件类型要跟平台上报的 `event_type` 全等匹配），中文只用来看着好懂；没配显示名的项直接显示值本身 |
 | 专用编辑器 | `ConfigField("cron", "cron 表达式", editor="cron")` | 这个字段用专用控件（`"cron"` → 可视化 cron 选择器）：画布**按标识挑控件、不认识节点类型** —— 加节点类型不用动前端；空串 = 通用渲染（有 `options` 就下拉、没有就输入框） |
+| 段数可变的入口（不定长） | `repeat_inputs=RepeatPorts(prefix="part", label="第 {n} 段", count_field="parts")` | 端口 id = `prefix + 序号`（1 起），个数读 `config[count_field]`（读不出整数用 `default_count`，再夹到 `[min_count, max_count]`）；**实际入口 = `inputs` + 展开的段端口**（`nodes/base.py` 的 `input_ports`，校验器与目录接口都走它）。规则随目录下发（`repeat_inputs`），画布按同一算法展开 —— 见 `concat` |
 
 连线本身的规则（端口存不存在 `UNKNOWN_PORT`、两端同不同类 `PORT_TYPE_MISMATCH`、数据入口只接
 一条线 `DUPLICATE_INPUT_EDGE`）由校验器统一查，**不用自己写**。
@@ -399,8 +405,11 @@ async def exec_dingtalk(node, ctx): ...
 config 里缺这个键时显示后端声明的默认值（界面上看到的就是实际生效的）。**画布不认识节点
 类型**——加节点类型、给某个字段换个控件，都只改后端。
 
-触发器拆成三个类型（`trigger-message` / `trigger-time` / `trigger-event`）之后，**没有「形状随
-config 变」的节点了** —— 卡片形状只由类型决定，前端不再需要任何特判。
+触发器拆成三个类型（`trigger-message` / `trigger-time` / `trigger-event`）之后，卡片形状基本只由
+类型决定；**唯一随 config 变的是「段数可变」那组端口**（`repeat_inputs`）—— 规则也随目录下发，
+画布按同一个数量口径展开（`editor/catalog.ts` 的 `repeatCount` 与 `nodes/base.py` 的
+`repeat_count` 是同一算法，**改一边要同步另一边**），所以画布上画几个口与后端认不认这个端口
+永远一致。除此之外前端没有任何节点特判。
 
 > 那份目录就是「两边对得上」的契约：面板上摆的必然是后端登记过的类型。万一旧图里还有认不出
 > 的类型，画布画成灰色未知节点，保存时被 `UNKNOWN_NODE_TYPE` 挡下 —— 以前那批只有声明没有

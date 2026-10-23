@@ -70,6 +70,26 @@ export interface NodePortSpec {
   tie?: string
 }
 
+/**
+ * 一组**按数量展开**的输入端口（段数在节点 config 里）：id = `prefix + 序号`（从 1 起），
+ * 显示名 = `label` 里的 `{n}` 换成序号。规则由后端当数据下发，画布按同一算法展开
+ * （见 catalog.repeatCount）——「画几个口」与「后端认不认这个端口」永远一致。
+ */
+export interface NodeRepeatInputsSpec {
+  prefix: string
+  /** 显示名模板，`{n}` 换成序号 */
+  label: string
+  /** 数量读 config 的哪个字段 */
+  count_field: string
+  /** 读不出整数时展开几个 */
+  default_count: number
+  min_count: number
+  max_count: number
+  type: PortType
+  /** 每段是否必填（接线或同名字段手填） */
+  required: boolean
+}
+
 /** config 里的一个字段：画布照它渲染输入框 / 下拉。 */
 export interface NodeFieldSpec {
   name: string
@@ -106,6 +126,8 @@ export interface NodeTypeSpec {
   inputs: NodePortSpec[]
   outputs: NodePortSpec[]
   fields: NodeFieldSpec[]
+  /** 按数量展开的输入端口规则（null = 端口固定）：实际输入 = inputs + 展开的段端口 */
+  repeat_inputs: NodeRepeatInputsSpec | null
 }
 
 /** 一种语义分类（目录接口 ``categories`` 逐条下发）：画布面板按它分组。

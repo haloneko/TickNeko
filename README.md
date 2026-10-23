@@ -121,7 +121,7 @@ cd frontend && npm install && npm run build
 
 这两个平台一正一反，正好验证了抽象是否站得住。加第三个平台只需要：写一个适配器（实现 `BotAdapter` 协议）+ 在 `bootstrap.py` 里装配一行，**接口层和工作流一行都不用改**。做法见 [docs/bridge/bridge.md](docs/bridge/bridge.md)。
 
-内置工作流节点：`start` / `end`、`log`、`test`、`constant`、`http`、`delay`、`json`、`regex`、`now`、`condition`、`send`、`onebot`、`operator`、`cache`、`target`。
+内置工作流节点：`start` / `end`、`log`、`test`、`constant`、`http`、`delay`、`json`、`regex`、`now`、`condition`、`send`、`onebot`、`operator`、`concat`、`cache`、`target`。
 
 三个运行规则值得记住：
 

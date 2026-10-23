@@ -61,6 +61,7 @@ from tickneko.workflow import (  # noqa: E402
 from tickneko.workflow.executor import get_executor  # noqa: E402
 from tickneko.workflow.nodes import (  # noqa: E402
     exec_cache,
+    exec_concat,
     exec_condition,
     exec_http,
     exec_json,
@@ -2554,6 +2555,190 @@ def test_operator_symbol_is_validated() -> None:
     assert [issue.code for issue in report.errors] == ["INPUT_NOT_CONNECTED"]
 
 
+# ------------------------------------------------------------- ④-H 文本拼接节点
+@pytest.mark.asyncio
+async def test_concat_joins_parts_in_order_and_grows_with_parts() -> None:
+    """段按 part1 -> partN 的**固定顺序**接；N 由 config.parts 定（调小了多出来的段不参与）。"""
+
+    async def join(parts: str, **inputs: object) -> str:
+        node_ = WorkflowNode(id="t1", type="concat", config={"parts": parts})
+        ctx_ = NodeExecutionContext()
+        ctx_.inputs = dict(inputs)
+        result = await exec_concat(node_, ctx_)
+        return str(result["text"])
+
+    assert await join("3", part1="现在是 ", part2="08:00", part3="，该打卡了") == "现在是 08:00，该打卡了"
+    # 段数改成 2：part3 不再属于这个节点（多送进来的键不参与拼接）
+    assert await join("2", part1="「", part2="」", part3="多余的") == "「」"
+
+
+def test_concat_ports_are_expanded_from_parts() -> None:
+    """段端口按 config.parts 展开（``input_ports`` 是唯一答案：校验器 / 目录接口都走它）。"""
+    from tickneko.workflow.nodes import get_spec, input_ports
+
+    spec = get_spec("concat")
+    assert spec is not None
+
+    def ids(config: dict[str, object]) -> list[str]:
+        return [port.id for port in input_ports(WorkflowNode(id="t1", type="concat", config=config), spec)]
+
+    assert ids({"parts": "3"}) == ["trigger", "part1", "part2", "part3"]
+    assert ids({}) == ["trigger", "part1", "part2"]  # 没配段数：按 default_count
+    assert ids({"parts": "99"}) == ["trigger", *[f"part{i}" for i in range(1, 11)]]  # 超出上限夹到 max_count
+
+
+@pytest.mark.asyncio
+async def test_concat_takes_wire_value_over_hand_filled() -> None:
+    """线上的值优先；没接线才用手填兜底（同名字段 ``config.partN``，与静态入口一个口径）。"""
+    node_ = WorkflowNode(id="t1", type="concat", config={"parts": "2", "part1": "手填", "part2": "兜底"})
+
+    ctx_ = NodeExecutionContext()
+    result = await exec_concat(node_, ctx_)
+    assert result["text"] == "手填兜底"
+
+    ctx_ = NodeExecutionContext()
+    ctx_.inputs = {"part1": "线上"}
+    result = await exec_concat(node_, ctx_)
+    assert result["text"] == "线上兜底"  # part1 用了线上的（若手填生效会是「手填兜底」）
+
+
+@pytest.mark.asyncio
+async def test_concat_textifies_non_string_values() -> None:
+    """值统一文本化：数字 / 布尔变成文本，None 当空串（不拼出「None」这种字）。"""
+    node_ = WorkflowNode(id="t1", type="concat", config={"parts": "3"})
+    ctx_ = NodeExecutionContext()
+    ctx_.inputs = {"part1": 3, "part2": None, "part3": True}
+    result = await exec_concat(node_, ctx_)
+    assert result["text"] == "3True"
+
+
+@pytest.mark.asyncio
+async def test_concat_all_empty_parts_fail() -> None:
+    """全段都空 = 业务失败：拼出空串往下送，下游会当成「拿到内容了」（见 5.5 节口径）。"""
+    from tickneko.workflow.nodes import NodeFailure
+
+    node_ = WorkflowNode(id="t1", type="concat", config={"parts": "2"})
+    ctx_ = NodeExecutionContext()
+    with pytest.raises(NodeFailure) as caught:
+        await exec_concat(node_, ctx_)
+    assert "没有可拼接的内容" in str(caught.value)
+    assert any("没有可拼接的内容" in line for line in ctx_.log)  # 痕迹照留
+
+
+@pytest.mark.asyncio
+async def test_concat_failure_in_graph_skips_downstream() -> None:
+    """图里跑：拼接失败时下游整段跳过（不是拿空串继续跑）。"""
+    graph = WorkflowGraph.model_validate(
+        {
+            "nodes": [
+                node("s", "trigger-message"),
+                node("t", "concat", parts="2"),  # 两段都没接线也没手填
+                node("l", "log", message="手填兜底"),
+                node("e", "end"),
+            ],
+            "edges": [
+                edge("s", "t"),
+                edge("s", "l"),
+                edge("t", "l", "text", "message"),
+                edge("l", "e"),
+            ],
+        }
+    )
+    ctx = NodeExecutionContext()
+    await SimpleWorkflowRunner().run(graph, ctx)  # 不抛：业务失败只停自己这条线
+
+    assert any("[failed] t:" in line for line in ctx.log)
+    # log 的另一条活入边（start）还在，所以照常执行；内容入口没被失败节点顶掉
+    assert any("[INFO] l: 手填兜底" in line for line in ctx.log)
+
+
+@pytest.mark.asyncio
+async def test_concat_in_graph_receives_wire_values() -> None:
+    """图里跑：数据边按**展开出来的段端口**投递 —— 常量进 part1、时间进 part2、末段手填。"""
+    graph = WorkflowGraph.model_validate(
+        {
+            "nodes": [
+                node("s", "trigger-message"),
+                node("c", "constant", value="现在是 "),
+                node("n", "now", format="%H:%M"),
+                node("t", "concat", parts="3", part3="，该打卡了"),
+                node("l", "log"),
+                node("e", "end"),
+            ],
+            "edges": [
+                edge("s", "c"),
+                edge("s", "n"),
+                edge("s", "t"),
+                edge("s", "l"),
+                edge("c", "t", "value", "part1"),
+                edge("n", "t", "now_text", "part2"),
+                edge("t", "l", "text", "message"),
+                edge("l", "e"),
+            ],
+        }
+    )
+    ctx = NodeExecutionContext()
+    await SimpleWorkflowRunner().run(graph, ctx)
+
+    joined = next(line for line in ctx.log if line.startswith("[INFO] l:"))
+    assert joined.startswith("[INFO] l: 现在是 ")
+    assert joined.endswith("，该打卡了")
+
+
+def test_concat_parts_and_required_segments_are_validated() -> None:
+    """段数枚举在语义阶段拦住；每段都是必填入口（接线或手填 ``config.partN``）。"""
+
+    def graph_with(**config: object) -> dict[str, object]:
+        return {
+            "nodes": [
+                node("s", "trigger-message"),
+                node("t", "concat", **config),
+                node("e", "end"),
+            ],
+            "edges": [edge("s", "t"), edge("t", "e")],
+        }
+
+    assert validate_graph(graph_with(parts="2", part1="a", part2="b")).valid
+    assert validate_graph(graph_with(parts="3", part1="a", part2="b", part3="c")).valid
+
+    # 段数不是枚举里的值 -> INVALID_CONCAT_PARTS（同时缺的段端口照常报必填）
+    report = validate_graph(graph_with(parts="1", part1="a"))
+    assert not report.valid and report.stage == STAGE_SEMANTIC
+    assert "INVALID_CONCAT_PARTS" in {issue.code for issue in report.errors}
+
+    # 段端口必填：parts=2 但第二段既没接线也没手填
+    report = validate_graph(graph_with(parts="2", part1="a"))
+    assert not report.valid and report.stage == STAGE_SEMANTIC
+    assert [issue.code for issue in report.errors] == ["INPUT_NOT_CONNECTED"]
+    assert "part2" in report.errors[0].message
+
+
+def test_concat_segment_ports_follow_the_parts_count() -> None:
+    """段数决定端口：parts=4 时 part4 是合法入口；缩回 3 之后同一根线就成 UNKNOWN_PORT。"""
+
+    def graph(parts: str) -> dict[str, object]:
+        return {
+            "nodes": [
+                node("s", "trigger-message"),
+                node("c4", "constant", value="d"),
+                node("t", "concat", parts=parts, part1="a", part2="b", part3="c"),
+                node("e", "end"),
+            ],
+            "edges": [
+                edge("s", "c4"),
+                edge("s", "t"),
+                edge("c4", "t", "value", "part4"),
+                edge("t", "e"),
+            ],
+        }
+
+    assert validate_graph(graph("4")).valid
+
+    report = validate_graph(graph("3"))
+    assert not report.valid and report.stage == STAGE_SEMANTIC
+    assert [issue.code for issue in report.errors] == ["UNKNOWN_PORT"]
+
+
 # ------------------------------------------------------------- ④-G 缓存节点
 class _FakeCache:
     """假的缓存门面（鸭子形状对齐 ``tickneko.core.cache.Cache``：``get`` / ``set`` 两个异步方法）。
@@ -2730,12 +2915,12 @@ def test_builtin_node_executors_are_registered() -> None:
     """包一被 import，内置节点的执行函数就都登记好了（一类一个文件，各自注册）。"""
     for node_type in (
         "trigger-message", "trigger-time", "trigger-event", "end", "log", "test", "http", "constant", "delay",
-        "json", "regex", "now", "condition", "operator", "cache", "placeholder",
+        "json", "regex", "now", "condition", "operator", "concat", "cache", "placeholder",
     ):
         assert get_executor(node_type) is not None
     assert set(registered_types()) >= {
         "trigger-message", "trigger-time", "trigger-event", "end", "log", "test", "http", "constant", "delay",
-        "json", "regex", "now", "condition", "operator", "cache", "placeholder",
+        "json", "regex", "now", "condition", "operator", "concat", "cache", "placeholder",
     }
 
 
@@ -3470,6 +3655,24 @@ async def test_api_node_types_catalog_matches_registry() -> None:
         ("trigger", "trigger", ""),
         ("value", "generic", "value"),
     ]
+
+    # 段数可变的入口：规则随目录下发（画布按同一算法展开），静态 inputs 里只有 trigger ——
+    # part1..partN 由 config.parts 决定，不能写死在后端目录里
+    concat = nodes["concat"]
+    assert [port["id"] for port in concat["inputs"]] == ["trigger"]
+    rule = concat["repeat_inputs"]
+    assert rule == {
+        "prefix": "part",
+        "label": "第 {n} 段",
+        "count_field": "parts",
+        "default_count": 2,
+        "min_count": 2,
+        "max_count": 10,
+        "type": "message",
+        "required": True,
+    }
+    # 其余类型的端口是固定的：没有 repeat_inputs
+    assert http["repeat_inputs"] is None
 
     end = nodes["end"]
     assert end["max_outgoing"] == 0 and end["outputs"] == []

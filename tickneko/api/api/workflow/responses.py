@@ -82,6 +82,40 @@ class NodePortData(_Frozen):
         )
 
 
+class NodeRepeatInputsData(_Frozen):
+    """一组**按数量展开**的输入端口（段数在节点 config 里，见后端 ``RepeatPorts``）。
+
+    规则是数据：``id`` = ``prefix + 序号``（从 1 起），显示名 = ``label`` 里的 ``{n}`` 换成
+    序号；数量读 ``config[count_field]``，读不出整数就用 ``default_count``，再夹到
+    ``[min_count, max_count]`` —— 画布（``catalog.ts`` 的 ``repeatCount``）按同一算法展开，
+    所以「画布上画几个口」与「后端认不认这个端口」永远一致。
+    """
+
+    prefix: str
+    label: str = "{n}"
+    count_field: str = ""
+    default_count: int = 2
+    min_count: int = 1
+    max_count: int = 20
+    type: str = "message"
+    required: bool = False
+
+    @classmethod
+    def from_rule(cls, rule: Any) -> NodeRepeatInputsData | None:
+        if rule is None:
+            return None
+        return cls(
+            prefix=rule.prefix,
+            label=rule.label,
+            count_field=rule.count_field,
+            default_count=rule.default_count,
+            min_count=rule.min_count,
+            max_count=rule.max_count,
+            type=rule.type,
+            required=rule.required,
+        )
+
+
 class NodeFieldData(_Frozen):
     """``config`` 里的一个字段：画布照它渲染输入框 / 下拉，并按 ``default`` 补初始值。
 
@@ -131,9 +165,12 @@ class NodeTypeData(_Frozen):
     category: str = "data"
     min_outgoing: int
     max_outgoing: int | None = None
+    #: 静态输入端口；带 ``repeat_inputs`` 的类型还会**按节点 config 再展开**一组段端口
     inputs: list[NodePortData] = Field(default_factory=list)
     outputs: list[NodePortData] = Field(default_factory=list)
     fields: list[NodeFieldData] = Field(default_factory=list)
+    #: 按数量展开的输入端口规则（None = 这类节点端口是固定的）
+    repeat_inputs: NodeRepeatInputsData | None = None
 
     @classmethod
     def from_spec(cls, spec: NodeSpec) -> NodeTypeData:
@@ -150,6 +187,7 @@ class NodeTypeData(_Frozen):
             inputs=[NodePortData.from_port(port) for port in spec.inputs],
             outputs=[NodePortData.from_port(port) for port in spec.outputs],
             fields=[NodeFieldData.from_field(field) for field in spec.fields],
+            repeat_inputs=NodeRepeatInputsData.from_rule(spec.repeat_inputs),
         )
 
 

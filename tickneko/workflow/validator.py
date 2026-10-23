@@ -28,7 +28,7 @@ from .models import (
     ValidationReport,
     WorkflowGraph,
 )
-from .nodes.base import MISSING_DEFAULT, PortSpec
+from .nodes.base import MISSING_DEFAULT, PortSpec, input_ports
 from .nodes.port_types import port_types_compatible
 from .nodes.registry import get_spec, registered_types
 
@@ -443,12 +443,17 @@ def _port_wiring(graph: WorkflowGraph, reachable: set[str]) -> list[ValidationIs
     另外，**某类型完全没声明端口**时不查它的那一端（只 ``declare_node_type`` 占位的扩展
     节点没有「端口名对不对」可言），声明了才查。
 
+    输入端口按**节点实例**取（:func:`~tickneko.workflow.nodes.base.input_ports`）：带
+    ``RepeatPorts`` 的类型（段数由 config 定）会展开出 ``part1`` / ``part2`` 这些口，与画布
+    上画出来的那份一致；输出端口仍是声明时的那一份。
+
     「一个入口只接一条线」这条只放行**控制流端口**（``trigger``）——它的多条入边是「汇聚」：
     多个上游都跑完才轮到本节点（执行器的入度排序天然如此），菱形 / 多分支汇流都靠它；
     其余端口（现在的 ``message``、将来新增的类型）都是「一个入口一份值」，多了没法选。
     """
     issues: list[ValidationIssue] = []
     node_type = {node.id: node.type for node in graph.nodes}
+    node_by_id = {node.id: node for node in graph.nodes}
     main_edges = [
         edge for edge in graph.edges if edge.source in reachable and edge.target in reachable
     ]
@@ -462,9 +467,12 @@ def _port_wiring(graph: WorkflowGraph, reachable: set[str]) -> list[ValidationIs
             continue
         # 两端各自独立判断：**该类型声明了端口才查这一端**。完全没声明端口的类型（只
         # ``declare_node_type`` 占个位的扩展节点）按「端口未定义」处理，不报端口错。
-        source_port = _find_port(source_spec.outputs, edge_source_port(edge))
-        target_port = _find_port(target_spec.inputs, edge_target_port(edge))
-        if source_spec.outputs and source_port is None:
+        # 输入端口按**节点实例**展开（RepeatPorts：段数在 config 里），输出端口是静态那份。
+        source_ports = source_spec.outputs
+        target_ports = input_ports(node_by_id[edge.target], target_spec)
+        source_port = _find_port(source_ports, edge_source_port(edge))
+        target_port = _find_port(target_ports, edge_target_port(edge))
+        if source_ports and source_port is None:
             issues.append(
                 ValidationIssue(
                     node_id=edge.source,
@@ -473,11 +481,11 @@ def _port_wiring(graph: WorkflowGraph, reachable: set[str]) -> list[ValidationIs
                         f"{node_type[edge.source]} 节点 {edge.source} 没有输出端口 "
                         f"{edge_source_port(edge)!r}"
                     ),
-                    suggestion=_port_hint(edge_source_port(edge), source_spec.outputs)
+                    suggestion=_port_hint(edge_source_port(edge), source_ports)
                     or "从面板右侧列出的输出端口里挑一个",
                 )
             )
-        if target_spec.inputs and target_port is None:
+        if target_ports and target_port is None:
             issues.append(
                 ValidationIssue(
                     node_id=edge.target,
@@ -486,7 +494,7 @@ def _port_wiring(graph: WorkflowGraph, reachable: set[str]) -> list[ValidationIs
                         f"{node_type[edge.target]} 节点 {edge.target} 没有输入端口 "
                         f"{edge_target_port(edge)!r}"
                     ),
-                    suggestion=_port_hint(edge_target_port(edge), target_spec.inputs)
+                    suggestion=_port_hint(edge_target_port(edge), target_ports)
                     or "从面板左侧列出的输入端口里挑一个",
                 )
             )
@@ -518,7 +526,7 @@ def _port_wiring(graph: WorkflowGraph, reachable: set[str]) -> list[ValidationIs
         spec = get_spec(node.type)
         if spec is None:  # 结构阶段已拦，这里只防御
             continue
-        for port in spec.inputs:
+        for port in input_ports(node, spec):
             count = incoming.get((node.id, port.id), 0)
             # 只放行 trigger：它的多条入边是「汇聚」（上游都跑完才轮到本节点）；其余端口
             # （message 以及将来新增的类型）按「一个入口一份值」处理，写反了只会更严不会更松

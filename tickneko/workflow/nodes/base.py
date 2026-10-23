@@ -189,6 +189,56 @@ TRIGGER_PORT = PortSpec("trigger", "trigger", "触发")
 
 
 @dataclass(frozen=True)
+class RepeatPorts:
+    """一组**按数量展开**的输入端口：id = ``prefix + 序号``（从 1 起），个数来自 config。
+
+    给「段数由用户定」的节点用（拼接 / 多路合并这类）::
+
+        @register_node(
+            "concat",
+            inputs=[TRIGGER_PORT],
+            repeat_inputs=RepeatPorts(prefix="part", label="第 {n} 段", count_field="parts"),
+        )
+
+    规则是**数据**，不是代码：目录接口把整份规则下发给画布，前端按同一条规则 + 节点 config
+    展开端口 —— 「画布上画几个口」与「后端认不认这个端口」用的是同一份声明，不会各算各的。
+    数量口径见 :func:`repeat_count`（两边必须是同一个算法），展开见 :func:`repeat_ports`。
+
+    :param prefix: 端口 id 前缀，实际 id 是 ``prefix + 序号``（如 ``part1`` / ``part2``）；
+    :param label: 显示名模板，``{n}`` 替换成序号；没有 ``{n}`` 时各段同名；
+    :param count_field: 数量从 config 的哪个字段读（缺失 / 非法时退回 :attr:`default_count`）；
+    :param default_count: 没配数量时展开几个；
+    :param min_count: 数量下限（展开时夹取）；
+    :param max_count: 数量上限（同上，别让一张图挂出上百个口）；
+    :param type: 段端口的类型（``trigger`` 没有意义：控制流不该按数量展开）；
+    :param required: 每段是否必填（接线或同名字段手填，与静态入口同口径）。
+    """
+
+    prefix: str
+    label: str = "{n}"
+    count_field: str = ""
+    default_count: int = 2
+    min_count: int = 1
+    max_count: int = 20
+    type: PortType = "message"
+    required: bool = False
+
+    def __post_init__(self) -> None:
+        """声明写错当场炸掉：前缀 / 数量字段必须有，区间必须是 ``1 <= min <= default <= max``。"""
+        if not self.prefix:
+            raise ValueError("RepeatPorts 的 prefix 不能为空（端口 id 靠它加序号）")
+        if not self.count_field:
+            raise ValueError("RepeatPorts 的 count_field 不能为空（数量得有出处）")
+        if self.type == "trigger":
+            raise ValueError("RepeatPorts 的端口不能是 trigger —— 控制流不按数量展开")
+        if not (1 <= self.min_count <= self.default_count <= self.max_count):
+            raise ValueError(
+                f"RepeatPorts 的数量区间不合法：1 <= min_count({self.min_count}) <= "
+                f"default_count({self.default_count}) <= max_count({self.max_count})"
+            )
+
+
+@dataclass(frozen=True)
 class NodeSpec:
     """一种节点类型的完整注册规格：执行器 + 配置字段规则 + 拓扑约束。
 
@@ -208,7 +258,9 @@ class NodeSpec:
     :param order: 画布面板顺序（小的在前，内置节点从 10 起）；
     :param category: 语义分类（画布面板分组用，见 :data:`NodeCategory`）；
     :param inputs: 输入端口（画布左侧圆点；数据入口的值进 ``ctx.inputs``）；
-    :param outputs: 输出端口（画布右侧圆点；执行函数返回值的键必须是这里的 id）。
+    :param outputs: 输出端口（画布右侧圆点；执行函数返回值的键必须是这里的 id）；
+    :param repeat_inputs: **按数量展开**的一组输入端口（段数从节点 config 读，见
+        :class:`RepeatPorts`）：实际端口 = ``inputs`` + 展开出来的那些，见 :func:`input_ports`。
 
     端口上声明的 ``tie``（透传对）在**注册这一步**就查对侧有没有那个端口（见
     :meth:`__post_init__`）：三个注册入口（``register_node`` / ``register_executor`` /
@@ -230,12 +282,18 @@ class NodeSpec:
     category: NodeCategory = "data"
     inputs: tuple[PortSpec, ...] = ()
     outputs: tuple[PortSpec, ...] = ()
+    #: 按数量展开的一组输入端口（段数来自 config，见 :class:`RepeatPorts`）
+    repeat_inputs: RepeatPorts | None = None
     #: 写入节点拥有的变量查看 / 修改实现，默认不开放；见 docs/variables/variables.md。
     variable_viewer: type[VariableViewer] | None = None
 
     def __post_init__(self) -> None:
         """透传对 ``tie`` 必须**指向另一侧的某个真实端口** —— 写错 id 是静默失效
-        （画布上表现为两端颜色对不上），注册时当场报错更好排查。"""
+        （画布上表现为两端颜色对不上），注册时当场报错更好排查。
+
+        展开出来的段端口也不能跟静态端口**重名**（重名等于同一个口有两份声明，画布画两遍、
+        校验各查各的），同样在注册这一步拦住。
+        """
         if self.variable_viewer is not None and (
             not isinstance(self.variable_viewer, type) or not issubclass(self.variable_viewer, VariableViewer)
         ):
@@ -251,6 +309,70 @@ class NodeSpec:
                     f"{self.node_type} 的输入 / 输出端口 {port.id!r} 声明了透传对 "
                     f"tie={port.tie!r}，但{side}端口里没有这个 id"
                 )
+        rule = self.repeat_inputs
+        if rule is not None:
+            static_ids = {port.id for port in self.inputs}
+            clash = [
+                f"{rule.prefix}{index}"
+                for index in range(rule.min_count, rule.max_count + 1)
+                if f"{rule.prefix}{index}" in static_ids
+            ]
+            if clash:
+                raise ValueError(
+                    f"{self.node_type} 的 RepeatPorts 会展开出 {clash[0]!r} 这类端口，"
+                    "但 inputs 里已经声明了同名端口 —— 段端口与静态端口不能重名"
+                )
+
+def _as_count(raw: Any) -> int | None:
+    """把 config 里的数量读成整数；不是整数（空 / 小数 / 布尔 / 非数字文本）返回 None。"""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float) and raw.is_integer():
+        return int(raw)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.lstrip("+-").isdigit():
+            return int(text)
+    return None
+
+
+def repeat_count(raw: Any, rule: RepeatPorts) -> int:
+    """数量口径：读不出整数就用 ``default_count``，再夹到 ``[min_count, max_count]``。
+
+    **前端按同一算法展开**（``frontend/src/features/workflow/editor/catalog.ts`` 的
+    ``repeatCount``）—— 改这里要同步那边，否则画布上画出来的口与后端认的对不上。
+    """
+    value = _as_count(raw)
+    if value is None:
+        value = rule.default_count
+    return max(rule.min_count, min(rule.max_count, value))
+
+
+def repeat_ports(node: WorkflowNode, rule: RepeatPorts) -> tuple[PortSpec, ...]:
+    """按数量展开的一组端口：``prefix + 序号``（从 1 起），label 里的 ``{n}`` 换成序号。"""
+    return tuple(
+        PortSpec(
+            f"{rule.prefix}{index}",
+            rule.type,
+            rule.label.replace("{n}", str(index)),
+            required=rule.required,
+        )
+        for index in range(1, repeat_count(node.config.get(rule.count_field), rule) + 1)
+    )
+
+
+def input_ports(node: WorkflowNode, spec: NodeSpec) -> tuple[PortSpec, ...]:
+    """**这个节点实例**实际生效的输入端口 = 静态声明 + 按数量展开的那组。
+
+    校验器与目录接口都从这里取 —— 「这个节点上到底有几个口」只有一个答案。执行器不用它：
+    引擎按边的 ``target_port`` 投递，键本来就来自图。
+    """
+    if spec.repeat_inputs is None:
+        return spec.inputs
+    return (*spec.inputs, *repeat_ports(node, spec.repeat_inputs))
+
 
 def input_value(
     node: WorkflowNode, ctx: NodeExecutionContext, name: str, default: Any = ""
