@@ -107,27 +107,65 @@ button.collapse-btn {
 }
 .caret {
   color: var(--text-3);
+  transition: transform 220ms var(--ease-out);
 }
+.user-btn[aria-expanded='true'] .caret { transform: rotate(180deg); }
 
 /* 下拉 */
-.menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-}
-
 .menu {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
   z-index: 101;
   width: 248px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-pop);
   padding: 8px;
-  animation: rise-in 0.18s var(--ease-out);
+  isolation: isolate;
+  --account-menu-duration: 150ms;
+  --account-menu-ease: cubic-bezier(0.55, 0, 1, 0.45);
+  visibility: hidden;
+  pointer-events: none;
+  transition: visibility 0s var(--account-menu-duration);
+}
+.menu::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  transform-origin: top right;
+  transform: translateY(-8px) scale(0.96, 0.92);
+  opacity: 0;
+  transition: transform var(--account-menu-duration) var(--account-menu-ease), opacity 120ms ease;
+}
+.menu > * {
+  transform: translateY(-6px);
+  opacity: 0;
+  transition: transform 100ms ease-in, opacity 100ms ease-in;
+}
+.menu[data-open='true'] {
+  --account-menu-duration: 260ms;
+  --account-menu-ease: cubic-bezier(0.22, 1.25, 0.36, 1);
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+.menu[data-open='true']::before {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+.menu[data-open='true'] > * {
+  transform: translateY(0);
+  opacity: 1;
+  transition: transform 180ms 25ms var(--ease-out), opacity 140ms 25ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu, .menu::before, .menu > *, .menu[data-open='true'] > *, .caret { transition: none; }
 }
 
 .menu-head {
