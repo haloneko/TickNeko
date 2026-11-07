@@ -624,9 +624,54 @@
   min-width: 152px;
   padding: 4px;
   border-radius: 10px;
+  border: 1px solid transparent;
+  isolation: isolate;
+}
+/* 外框独立生长；根节点与文字不缩放，二级菜单的定位和溢出规则也不变。 */
+.ctxMenu::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
   border: 1px solid var(--border-strong);
+  border-radius: inherit;
   background: var(--surface);
   box-shadow: var(--shadow-pop);
+  pointer-events: none;
+  transform-origin: var(--ctx-origin-x) var(--ctx-origin-y);
+  animation: ctx-frame-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.ctxMenu > * {
+  animation: ctx-content-in 140ms 35ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.ctxMenu[data-menu-phase='leaving'] {
+  pointer-events: none;
+}
+.ctxMenu[data-menu-phase='leaving']::before {
+  animation: ctx-frame-out var(--ctx-exit-duration) ease-in both;
+}
+.ctxMenu[data-menu-phase='leaving'] > * {
+  animation: ctx-content-out 100ms ease-in both;
+}
+@keyframes ctx-frame-in {
+  from { opacity: 0; transform: scale(0.9, 0.84); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes ctx-frame-out {
+  to { opacity: 0; transform: scale(0.94, 0.9); }
+}
+@keyframes ctx-content-in {
+  from { opacity: 0; transform: translateY(var(--ctx-text-offset)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes ctx-content-out {
+  to { opacity: 0; transform: translateY(var(--ctx-text-offset)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ctxMenu::before,
+  .ctxMenu > * {
+    animation: none;
+  }
 }
 .ctxMenuItem {
   display: flex;

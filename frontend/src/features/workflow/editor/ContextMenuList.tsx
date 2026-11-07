@@ -5,10 +5,11 @@
  * 连行高都不写死在「标题 27 + 每行 32」那种口径上 —— 位置是按**实际会画出来的那几行**累加出来的，
  * 所以往配置表里加 / 删按钮，菜单位置与二级菜单的展开方向不用跟着改。
  */
-import { Fragment, useState } from 'react'
+import { Fragment, useLayoutEffect, useState, type CSSProperties } from 'react'
 import { IconChevronRight } from '../../../common/icons'
 import { categoryLabel, groupByCategory, nodeDef } from './catalog'
 import type { MenuActions, MenuContext, MenuEntry } from './menu'
+import { CONTEXT_MENU_EXIT_MS } from './menuMotion'
 import styles from '../WorkflowEditor.module.css'
 
 //: 各类行的高度（px）：只用来估菜单位置，不参与渲染
@@ -29,6 +30,7 @@ export interface ContextMenuListProps {
   /** 视口坐标（``position: fixed``） */
   x: number
   y: number
+  leaving?: boolean
   menuRef: React.RefObject<HTMLDivElement>
   entries: MenuEntry[]
   ctx: MenuContext
@@ -77,6 +79,7 @@ function layout(entries: MenuEntry[], ctx: MenuContext): Row[] {
 export function ContextMenuList({
   x,
   y,
+  leaving = false,
   menuRef,
   entries,
   ctx,
@@ -85,6 +88,12 @@ export function ContextMenuList({
 }: ContextMenuListProps) {
   /** 当前展开的二级菜单（行 id；null = 都收着） */
   const [openRow, setOpenRow] = useState<string | null>(null)
+
+  useLayoutEffect(() => {
+    const element = menuRef.current
+    if (!element) return
+    element.toggleAttribute('inert', leaving)
+  }, [leaving, menuRef])
 
   const rows = layout(entries, ctx)
   const menuH = rows.reduce((sum, row) => sum + row.h, PAD * 2)
@@ -189,7 +198,23 @@ export function ContextMenuList({
     <div
       ref={menuRef}
       className={styles.ctxMenu}
-      style={{ left, top, minWidth: MENU_W }}
+      data-menu-phase={leaving ? 'leaving' : 'open'}
+      aria-hidden={leaving || undefined}
+      style={{
+        left,
+        top,
+        minWidth: MENU_W,
+        '--ctx-origin-x': `${Math.max(0, Math.min(x - left, MENU_W))}px`,
+        '--ctx-origin-y': `${Math.max(0, Math.min(y - top, menuH))}px`,
+        '--ctx-text-offset': y - top > menuH / 2 ? '-6px' : '6px',
+        '--ctx-exit-duration': `${CONTEXT_MENU_EXIT_MS}ms`,
+      } as CSSProperties}
+      onClickCapture={(event) => {
+        if (leaving) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+      }}
       onContextMenu={(e) => e.preventDefault()}
       onMouseLeave={() => setOpenRow(null)}
     >
