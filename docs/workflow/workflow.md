@@ -629,3 +629,11 @@ workflow_logger().info("工作流已登记", workflow_id=...)
 
 这层显示生命周期由 `editor/ContextMenuHost.tsx` 与 `editor/menuMotion.ts` 管理；菜单动作、节点落点和二级菜单展开逻辑保持原有职责。
 退场与重新打开的回归用例：在 `frontend/` 执行 `node --test tests/contextMenuMotion.test.mjs`。
+
+### 8.5 共用的二级菜单
+
+右键分类共用 `editor/ContextSubmenu.tsx` 的一个外框。初次打开和最后收起播放开合；
+滑过不同分类时保留外框 DOM，只过渡位置和实测宽高，并单独切换文字层，不缩放文字。
+`editor/submenuMotion.ts` 负责视口定位，右侧不够时向左展开，下沿不够时向上调整。
+父子菜单的窄缝有鼠标通道，离开时有短暂缓冲；退场层立即失去交互，避免点到旧分类。
+定位边界用例：`node --test tests/submenuMotion.test.mjs`。
