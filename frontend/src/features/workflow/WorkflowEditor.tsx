@@ -481,9 +481,10 @@ export default function WorkflowEditor({ workflowId, onClose }: WorkflowEditorPr
       />
 
       <div className={styles.body}>
-        {nodeCatalog.palette !== null && showPalette && (
+        {nodeCatalog.palette !== null && (
           <Palette
             items={nodeCatalog.palette}
+            visible={showPalette}
             onItemMouseDown={paletteDrag.onItemMouseDown}
             onItemClick={paletteDrag.onItemClick}
           />
