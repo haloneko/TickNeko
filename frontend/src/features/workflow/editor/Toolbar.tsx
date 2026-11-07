@@ -109,6 +109,8 @@ export function Toolbar({
           className={`btn ${showInspector ? '' : styles.toggleOff}`}
           onClick={onToggleInspector}
           title="切换配置面板"
+          aria-controls="workflow-node-inspector"
+          aria-expanded={showInspector}
         >
           配置
         </button>

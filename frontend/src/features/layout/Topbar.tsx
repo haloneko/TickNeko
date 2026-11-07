@@ -1,9 +1,9 @@
 /**
  * 顶栏：
  * - 左侧：小屏汉堡（开抽屉）/ 桌面折叠按钮（收侧栏）+ 当前页面标题；
- * - 右侧：主题切换 + 用户菜单（资料、退出登录）。
+ * - 右侧：主题切换 + 用户菜单；显隐、交互与动效见 docs/console/layout.md。
  */
-import { useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { NAV_ITEMS } from './nav'
 import { useLayout } from './layoutStore'
@@ -29,6 +29,42 @@ export default function Topbar() {
   const { collapsed, toggleCollapsed, toggleMobile } = useLayout()
   const [menuOpen, setMenuOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
+  const menuId = useId()
+  const userWrapRef = useRef<HTMLDivElement>(null)
+  const userButtonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current
+    if (!menu) return
+    menu.toggleAttribute('inert', !menuOpen)
+    if (menuOpen) {
+      menu.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true })
+    } else if (menu.contains(menu.ownerDocument.activeElement)) {
+      userButtonRef.current?.focus({ preventScroll: true })
+    }
+  }, [menuOpen])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !userWrapRef.current?.contains(event.target)) setMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setMenuOpen(false)
+      userButtonRef.current?.focus({ preventScroll: true })
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
+
+  useEffect(() => setMenuOpen(false), [location.key])
 
   const current =
     NAV_ITEMS.find((i) =>
@@ -83,12 +119,23 @@ export default function Topbar() {
       <div className={styles.right}>
         <ThemeToggle />
 
-        <div className={styles.userWrap}>
+        <div ref={userWrapRef} className={styles.userWrap}
+          onBlur={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMenuOpen(false)
+          }}>
           <button
+            ref={userButtonRef}
             className={styles.userBtn}
             onClick={() => setMenuOpen((v) => !v)}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
+            aria-controls={menuId}
+            onKeyDown={event => {
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault()
+                setMenuOpen(true)
+              }
+            }}
           >
             <AvatarImage initial={initial} size="sm" />
             <span className={styles.userMeta}>
@@ -99,13 +146,18 @@ export default function Topbar() {
             <IconChevronDown size={15} className={styles.caret} />
           </button>
 
-          {menuOpen && (
-            <>
-              <div
-                className={styles.menuBackdrop}
-                onClick={() => setMenuOpen(false)}
-              />
-              <div className={styles.menu} role="menu">
+              <div ref={menuRef} id={menuId} className={styles.menu} role="menu"
+                aria-label="账号菜单" aria-hidden={!menuOpen || undefined} data-open={menuOpen}
+                onKeyDown={event => {
+                  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+                  event.preventDefault()
+                  const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'))
+                  if (!items.length) return
+                  const currentIndex = items.indexOf(event.currentTarget.ownerDocument.activeElement as HTMLElement)
+                  const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+                    : (currentIndex + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
+                  items[index].focus({ preventScroll: true })
+                }}>
                 <div className={styles.menuHead}>
                   <AvatarImage initial={initial} size="md" />
                   <div className={styles.menuUser}>
@@ -153,8 +205,6 @@ export default function Topbar() {
                   {loggingOut ? '正在退出…' : '退出登录'}
                 </button>
               </div>
-            </>
-          )}
         </div>
       </div>
     </header>
