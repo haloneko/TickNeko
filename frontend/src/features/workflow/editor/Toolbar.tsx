@@ -100,6 +100,8 @@ export function Toolbar({
           className={`btn ${showPalette ? '' : styles.toggleOff}`}
           onClick={onTogglePalette}
           title="切换节点面板"
+          aria-controls="workflow-node-palette"
+          aria-expanded={showPalette}
         >
           节点
         </button>

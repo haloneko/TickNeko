@@ -112,6 +112,50 @@
   flex-direction: column;
   box-shadow: var(--shadow-pop);
   z-index: 10;
+  /* 保留同一面板与滚动位置；位移和裁切不改变文字尺寸，可随时反向过渡。 */
+  transform: translateX(-20px);
+  clip-path: inset(-12px calc(100% + 12px) -12px -12px round var(--r-md));
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform 220ms var(--ease-out),
+    clip-path 220ms var(--ease-out),
+    opacity 160ms ease,
+    visibility 0s 220ms;
+}
+.palette[data-open='true'] {
+  transform: translateX(0);
+  clip-path: inset(-12px -12px -12px -12px round var(--r-md));
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+.palette > * {
+  transform: translateX(-6px);
+  opacity: 0;
+  transition: transform 180ms var(--ease-out), opacity 120ms ease;
+}
+.palette[data-open='true'] > * {
+  transform: translateX(0);
+  opacity: 1;
+  transition-delay: 25ms;
+}
+/* 首次打开编辑器时也从收起状态进入；后续切换仍沿用同一组过渡。 */
+@starting-style {
+  .palette[data-open='true'] {
+    transform: translateX(-20px);
+    clip-path: inset(-12px calc(100% + 12px) -12px -12px round var(--r-md));
+    opacity: 0;
+  }
+  .palette[data-open='true'] > * {
+    transform: translateX(-6px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .palette, .palette > * { transition: none; }
 }
 .paletteTitle {
   font-size: 12px;

@@ -1,6 +1,7 @@
 /**
- * 节点面板（悬浮在画布左侧）：点一下直接添加，按住拖进画布则在松手处落子。
+ * 节点面板：点选 / 拖出节点；显隐与动效约定见 docs/workflow/workflow.md 第 9 节。
  */
+import { useLayoutEffect, useRef } from 'react'
 import {
   categoryLabel,
   groupByCategory,
@@ -12,16 +13,28 @@ import styles from '../WorkflowEditor.module.css'
 
 export interface PaletteProps {
   items: NodeTypeSpec[]
+  visible: boolean
   /** 按下（拖进画布的起点） */
   onItemMouseDown: (event: React.MouseEvent, type: string) => void
   /** 纯点击 / 键盘触发 */
   onItemClick: (event: React.MouseEvent, type: string) => void
 }
 
-export function Palette({ items, onItemMouseDown, onItemClick }: PaletteProps) {
+export function Palette({ items, visible, onItemMouseDown, onItemClick }: PaletteProps) {
+  const panelRef = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    const panel = panelRef.current
+    if (!panel) return
+    if (!visible && panel.contains(panel.ownerDocument.activeElement)) {
+      panel.ownerDocument.querySelector<HTMLButtonElement>('button[aria-controls="workflow-node-palette"]')
+        ?.focus({ preventScroll: true })
+    }
+    panel.toggleAttribute('inert', !visible)
+  }, [visible])
   const groups = groupByCategory(items)
   return (
-    <aside className={styles.palette}>
+    <aside ref={panelRef} id="workflow-node-palette" className={styles.palette}
+      data-open={visible} aria-label="节点面板" aria-hidden={!visible || undefined}>
       <div className={styles.paletteTitle}>节点</div>
       {groups.map(([category, specs]) => (
         <div key={category} className={styles.paletteGroup}>
