@@ -433,6 +433,32 @@
   gap: 12px;
   box-shadow: var(--shadow-pop);
   z-index: 10;
+  /* 整块面板平移出视口，表单随框一起移动，不裁切、缩放或淡出。 */
+  --inspector-duration: 220ms;
+  --inspector-ease: cubic-bezier(0.55, 0, 1, 0.45);
+  transform: translateX(calc(100% + 32px));
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform var(--inspector-duration) var(--inspector-ease),
+    visibility 0s var(--inspector-duration);
+}
+.inspector[data-open='true'] {
+  /* 进入时约 6px 的轻微越过与回稳；退出加速滑走，不在视口边缘急停。 */
+  --inspector-duration: 380ms;
+  --inspector-ease: cubic-bezier(0.22, 1.25, 0.36, 1);
+  transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+@starting-style {
+  .inspector[data-open='true'] {
+    transform: translateX(calc(100% + 32px));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .inspector { transition: none; }
 }
 .inspectorHead {
   display: flex;

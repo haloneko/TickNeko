@@ -575,8 +575,9 @@ export default function WorkflowEditor({ workflowId, onClose }: WorkflowEditorPr
           })()}
         </Canvas>
 
-        {nodeCatalog.palette !== null && showInspector && (
+        {nodeCatalog.palette !== null && (
           <Inspector
+            visible={showInspector}
             node={selectedNode}
             def={selectedDef}
             wired={selectedWired}

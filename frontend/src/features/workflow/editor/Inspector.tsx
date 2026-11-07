@@ -1,11 +1,12 @@
 /**
- * 配置面板（悬浮在画布右侧）：选中节点的端口信息与配置字段 + 校验报告 + 版本历史。
+ * 配置面板：节点字段、校验与历史；显隐动效见 docs/workflow/workflow.md 的「配置面板的显隐」。
  *
  * **控件全按后端声明挑**（见 ``NodeFieldSpec``）：``editor`` 有专用编辑器（cron -> 可视化选择
  * 器），``options`` 渲染成下拉，其余是输入框 —— 这里不认识任何节点类型，加节点类型不用动它。
  * 与数据入口**同名**的字段照常可填 —— 那是「没接线时的手填兜底」，标签上写明当前这个值是
  * 线上来的还是手填的。后端没声明、但 config 里确实存在的键也照旧给个输入框，别让它消失。
  */
+import { useLayoutEffect, useRef } from 'react'
 import { IconTrash } from '../../../common/icons'
 import { CronPicker } from '../../../common/CronPicker'
 import {
@@ -20,6 +21,7 @@ import type { WorkflowVersionData } from '../workflowApi'
 import styles from '../WorkflowEditor.module.css'
 
 export interface InspectorProps {
+  visible: boolean
   node: WorkflowNode | null
   def: NodeTypeDef | null
   /** 选中节点已经接上线的入口（没写端口的边按 trigger 算） */
@@ -34,6 +36,7 @@ export interface InspectorProps {
 }
 
 export function Inspector({
+  visible,
   node,
   def,
   wired,
@@ -43,8 +46,19 @@ export function Inspector({
   onUpdate,
   onDelete,
 }: InspectorProps) {
+  const panelRef = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    const panel = panelRef.current
+    if (!panel) return
+    if (!visible && panel.contains(panel.ownerDocument.activeElement)) {
+      panel.ownerDocument.querySelector<HTMLButtonElement>('button[aria-controls="workflow-node-inspector"]')
+        ?.focus({ preventScroll: true })
+    }
+    panel.toggleAttribute('inert', !visible)
+  }, [visible])
   return (
-    <aside className={styles.inspector}>
+    <aside ref={panelRef} id="workflow-node-inspector" className={styles.inspector}
+      data-open={visible} aria-label="配置面板" aria-hidden={!visible || undefined}>
       {node && def ? (
         <>
           <div className={styles.inspectorHead}>
