@@ -11,6 +11,7 @@
 
 | 文档 | 覆盖的模块 | 主要内容 |
 |---|---|---|
+| [console/layout.md](console/layout.md) | 控制台顶栏 `frontend/src/features/layout/Topbar.tsx` | 账号菜单的开合动效、关闭交互、键盘操作与手工回归 |
 | [app/app.md](app/app.md) | 根目录 `app.py` / `config.py` | 启动顺序与停机收尾、数据库探测、配置区域与三层覆盖、报错口径、Kook 密钥的派生规则 |
 | [logger/logger.md](logger/logger.md) | `tickneko.core.logger` | 异步日志：root + child / bind / route、目标与过滤器、检索与刷新、进程门面 |
 | [cache/cache.md](cache/cache.md) | `tickneko.core.cache` + cache 节点 | 一套 API 两种后端（Redis / 内存）、后端协议约定、降级与命名空间、配置注入；cache 节点的键与作用域 / get-set 口径（文末「缓存节点」） |
