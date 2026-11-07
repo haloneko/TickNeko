@@ -5,10 +5,12 @@
  * 连行高都不写死在「标题 27 + 每行 32」那种口径上 —— 位置是按**实际会画出来的那几行**累加出来的，
  * 所以往配置表里加 / 删按钮，菜单位置与二级菜单的展开方向不用跟着改。
  */
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { IconChevronRight } from '../../../common/icons'
-import { categoryLabel, groupByCategory, nodeDef } from './catalog'
+import { categoryLabel, groupByCategory } from './catalog'
+import { ContextSubmenu, type ActiveSubmenu } from './ContextSubmenu'
 import type { MenuActions, MenuContext, MenuEntry } from './menu'
+import { CONTEXT_MENU_EXIT_MS } from './menuMotion'
 import styles from '../WorkflowEditor.module.css'
 
 //: 各类行的高度（px）：只用来估菜单位置，不参与渲染
@@ -17,11 +19,8 @@ const TITLE_H = 27
 const SEP_H = 9
 //: 菜单内边距（与 CSS 的 .ctxMenu padding 一致）
 const PAD = 4
-//: 宽度估算：一级菜单最小宽度 / 二级菜单大致宽度；用来把菜单夹回视口
+//: 一级菜单最小宽度；二级菜单由 ContextSubmenu 实测
 const MENU_W = 184
-const SUBMENU_W = 176
-//: 二级菜单最多这么高（与 CSS 的 max-height 同一口径）：装不下就改成向上展开
-const SUBMENU_MAX_H = 380
 //: 与视口边缘留的空隙
 const GAP = 8
 
@@ -29,6 +28,7 @@ export interface ContextMenuListProps {
   /** 视口坐标（``position: fixed``） */
   x: number
   y: number
+  leaving?: boolean
   menuRef: React.RefObject<HTMLDivElement>
   entries: MenuEntry[]
   ctx: MenuContext
@@ -77,21 +77,32 @@ function layout(entries: MenuEntry[], ctx: MenuContext): Row[] {
 export function ContextMenuList({
   x,
   y,
+  leaving = false,
   menuRef,
   entries,
   ctx,
   actions,
   onDone,
 }: ContextMenuListProps) {
-  /** 当前展开的二级菜单（行 id；null = 都收着） */
-  const [openRow, setOpenRow] = useState<string | null>(null)
+  /** 当前分类及其定位锚点；null 表示全部收起。 */
+  const [submenu, setSubmenu] = useState<ActiveSubmenu | null>(null)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelClose = () => {
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current)
+    closeTimer.current = null
+  }
+  useEffect(() => cancelClose, [])
+
+  useLayoutEffect(() => {
+    const element = menuRef.current
+    if (!element) return
+    element.toggleAttribute('inert', leaving)
+  }, [leaving, menuRef])
 
   const rows = layout(entries, ctx)
   const menuH = rows.reduce((sum, row) => sum + row.h, PAD * 2)
   const left = Math.max(GAP, Math.min(x, window.innerWidth - MENU_W - GAP))
   const top = Math.max(GAP, Math.min(y, Math.max(GAP, window.innerHeight - menuH - GAP)))
-  // 右边放不下二级菜单：二级菜单整份往左翻
-  const flipX = left + MENU_W + SUBMENU_W > window.innerWidth
 
   /** 一个可点的普通项：跑动作，然后收菜单 */
   const run = (fn: () => void) => {
@@ -99,7 +110,7 @@ export function ContextMenuList({
     onDone()
   }
 
-  const renderRow = ({ entry, offset }: Row) => {
+  const renderRow = ({ entry }: Row) => {
     if (entry.kind === 'separator') return <div key={entry.id} className={styles.ctxMenuSep} />
     if (entry.kind === 'action') {
       return (
@@ -111,6 +122,7 @@ export function ContextMenuList({
               : styles.ctxMenuItem
           }
           onClick={() => run(() => entry.run(ctx, actions))}
+          onMouseEnter={() => { cancelClose(); setSubmenu(null) }}
         >
           {entry.icon}
           {entry.label(ctx)}
@@ -123,23 +135,25 @@ export function ContextMenuList({
     return (
       <Fragment key={entry.id}>
         <div className={styles.ctxMenuTitle}>{entry.title}</div>
-        {groups.map(([category, specs], idx) => {
+        {groups.map(([category, specs]) => {
           const rowId = `${entry.id}:${category}`
-          const open = openRow === rowId
-          // 这一行的二级菜单展开后会向下长 SUBMENU_MAX_H：装不下就改成向上长
-          const rowBottom = top + offset + TITLE_H + (idx + 1) * ROW_H
-          const flipY = rowBottom + SUBMENU_MAX_H > window.innerHeight - GAP
+          const open = submenu?.id === rowId
+          const show = (anchor: HTMLElement) => {
+            cancelClose()
+            const main = menuRef.current
+            if (main) setSubmenu(last => last?.id === rowId ? last : { id: rowId, specs, anchor, main })
+          }
           return (
             <div
               key={rowId}
               className={styles.ctxSubWrap}
-              onMouseEnter={() => setOpenRow(rowId)}
+              onMouseEnter={event => show(event.currentTarget)}
             >
               <button
                 className={styles.ctxMenuItem}
                 aria-haspopup="menu"
                 aria-expanded={open}
-                onClick={() => setOpenRow(open ? null : rowId)}
+                onClick={event => show(event.currentTarget)}
               >
                 <span className={`${styles.ctxDot} ${styles.ctxDotGroup}`} />
                 {categoryLabel(category)}
@@ -149,35 +163,6 @@ export function ContextMenuList({
                 </span>
               </button>
 
-              {open && (
-                <div
-                  className={[
-                    styles.ctxSubMenu,
-                    flipX ? styles.ctxSubMenuLeft : '',
-                    flipY ? styles.ctxSubMenuUp : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  style={{ minWidth: SUBMENU_W }}
-                  role="menu"
-                >
-                  {specs.map((spec) => {
-                    const def = nodeDef(spec.type)
-                    return (
-                      <button
-                        key={spec.type}
-                        className={styles.ctxMenuItem}
-                        role="menuitem"
-                        title={def.label}
-                        onClick={() => run(() => actions.add(spec.type, ctx.point))}
-                      >
-                        <span className={styles.ctxDot} style={{ background: def.color }} />
-                        {def.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
             </div>
           )
         })}
@@ -189,11 +174,33 @@ export function ContextMenuList({
     <div
       ref={menuRef}
       className={styles.ctxMenu}
-      style={{ left, top, minWidth: MENU_W }}
+      data-menu-phase={leaving ? 'leaving' : 'open'}
+      aria-hidden={leaving || undefined}
+      style={{
+        left,
+        top,
+        minWidth: MENU_W,
+        '--ctx-origin-x': `${Math.max(0, Math.min(x - left, MENU_W))}px`,
+        '--ctx-origin-y': `${Math.max(0, Math.min(y - top, menuH))}px`,
+        '--ctx-text-offset': y - top > menuH / 2 ? '-6px' : '6px',
+        '--ctx-exit-duration': `${CONTEXT_MENU_EXIT_MS}ms`,
+      } as CSSProperties}
+      onClickCapture={(event) => {
+        if (leaving) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+      }}
       onContextMenu={(e) => e.preventDefault()}
-      onMouseLeave={() => setOpenRow(null)}
+      onMouseEnter={cancelClose}
+      onMouseLeave={() => {
+        cancelClose()
+        closeTimer.current = setTimeout(() => setSubmenu(null), 100)
+      }}
     >
       {rows.map(renderRow)}
+      <ContextSubmenu active={submenu} leaving={leaving}
+        onPick={type => run(() => actions.add(type, ctx.point))} />
     </div>
   )
 }
